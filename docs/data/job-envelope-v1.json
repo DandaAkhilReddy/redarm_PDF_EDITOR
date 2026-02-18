@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://redarm.local/schemas/job-envelope-v1.json",
+  "title": "Job Envelope v1",
+  "type": "object",
+  "required": ["jobId", "type", "docId", "attempt", "createdUtc", "status"],
+  "properties": {
+    "jobId": { "type": "string", "minLength": 1 },
+    "type": { "type": "string", "enum": ["ocr", "export"] },
+    "docId": { "type": "string", "minLength": 1 },
+    "attempt": { "type": "integer", "minimum": 0 },
+    "createdUtc": { "type": "string", "format": "date-time" },
+    "status": { "type": "string", "enum": ["queued", "running", "completed", "failed"] },
+    "ownerEmail": { "type": "string", "format": "email" },
+    "resultUri": { "type": ["string", "null"] },
+    "error": { "type": ["string", "null"] }
+  },
+  "additionalProperties": true
+}

@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://redarm.local/schemas/doc-metadata-v1.json",
+  "title": "Document Metadata v1",
+  "type": "object",
+  "required": ["docId", "ownerEmail", "blobPath", "version", "updatedAt"],
+  "properties": {
+    "docId": { "type": "string", "minLength": 1 },
+    "ownerEmail": { "type": "string", "format": "email" },
+    "blobPath": { "type": "string", "minLength": 1 },
+    "version": { "type": "integer", "minimum": 1 },
+    "title": { "type": "string" },
+    "contentType": { "type": "string" },
+    "annotationJson": { "type": "string" },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "updatedAt": { "type": "string", "format": "date-time" }
+  },
+  "additionalProperties": true
+}

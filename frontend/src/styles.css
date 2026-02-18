@@ -1,0 +1,108 @@
+:root {
+  color-scheme: light;
+  font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+  background: #f4f5f8;
+  color: #11131a;
+}
+
+body {
+  margin: 0;
+}
+
+.container {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+h1 {
+  margin-top: 0;
+  font-size: 1.8rem;
+}
+
+.card {
+  background: #fff;
+  border: 1px solid #dde3ef;
+  border-radius: 10px;
+  padding: 16px;
+  margin-bottom: 16px;
+}
+
+.row {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.row > * {
+  flex: 1 1 220px;
+}
+
+input,
+select,
+button,
+textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  border: 1px solid #bec9dc;
+  border-radius: 6px;
+  font: inherit;
+}
+
+button {
+  background: #0e4fd6;
+  color: #fff;
+  border: none;
+  cursor: pointer;
+}
+
+button.secondary {
+  background: #3f4656;
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+pre {
+  background: #111827;
+  color: #e5e7eb;
+  padding: 12px;
+  border-radius: 8px;
+  overflow-x: auto;
+}
+
+canvas {
+  width: 100%;
+  max-width: 800px;
+  border: 1px solid #d1d9ea;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.small {
+  color: #4b5563;
+  font-size: 0.9rem;
+}
+
+.jobs {
+  display: grid;
+  gap: 8px;
+}
+
+.job-item {
+  border: 1px solid #d7deec;
+  border-radius: 8px;
+  padding: 10px;
+  background: #fbfcff;
+}
+
+.error {
+  color: #b91c1c;
+}
+
+.success {
+  color: #166534;
+}

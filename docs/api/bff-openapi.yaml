@@ -1,0 +1,115 @@
+openapi: 3.0.3
+info:
+  title: RedArm Cheap Backend API
+  version: 0.1.0
+servers:
+  - url: https://{functionApp}.azurewebsites.net/api
+    variables:
+      functionApp:
+        default: redarm-devcheap-func
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+    LoginResponse:
+      type: object
+      properties:
+        accessToken:
+          type: string
+        expiresIn:
+          type: string
+        user:
+          type: object
+          properties:
+            email:
+              type: string
+            role:
+              type: string
+paths:
+  /auth/login:
+    post:
+      summary: Login with email and password
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Logged in
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+  /docs/upload-url:
+    post:
+      summary: Create a short-lived upload SAS for a new PDF document
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: Upload URL created
+  /docs/{docId}/save-annotation:
+    post:
+      summary: Save annotations for a document
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: docId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Annotation saved
+  /docs/{docId}/export:
+    post:
+      summary: Queue export job
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: docId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '202':
+          description: Job queued
+  /docs/{docId}/ocr:
+    post:
+      summary: Queue OCR job
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: docId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '202':
+          description: Job queued
+  /jobs/{jobId}:
+    get:
+      summary: Get asynchronous job status
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: jobId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Job state

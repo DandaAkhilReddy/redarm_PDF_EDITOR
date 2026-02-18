@@ -1,0 +1,31 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "AzureWebJobsStorage": "UseDevelopmentStorage=true",
+    "FUNCTIONS_WORKER_RUNTIME": "node",
+    "JWT_SECRET": "replace-me-dev-secret",
+    "JWT_EXPIRES_IN": "8h",
+    "BCRYPT_ROUNDS": "10",
+    "LOCKOUT_THRESHOLD": "5",
+    "LOCKOUT_MINUTES": "15",
+    "MAX_UPLOAD_BYTES": "10485760",
+    "BOOTSTRAP_ADMIN_EMAIL": "admin@example.com",
+    "BOOTSTRAP_ADMIN_PASSWORD": "ChangeMeNow123!",
+    "STORAGE_CONNECTION_STRING": "UseDevelopmentStorage=true",
+    "STORAGE_ACCOUNT_NAME": "",
+    "STORAGE_ACCOUNT_KEY": "",
+    "BLOB_SOURCE_CONTAINER": "pdf-source",
+    "BLOB_EXPORT_CONTAINER": "pdf-export",
+    "BLOB_OCR_CONTAINER": "ocr-json",
+    "TABLE_USERS": "users",
+    "TABLE_DOCUMENTS": "documents",
+    "TABLE_SESSIONS": "sessions",
+    "TABLE_JOBS": "jobs",
+    "QUEUE_OCR": "q-ocr",
+    "QUEUE_EXPORT": "q-export",
+    "DOCINTEL_ENDPOINT": "",
+    "DOCINTEL_KEY": "",
+    "DOCINTEL_MODEL_ID": "prebuilt-read",
+    "APP_BASE_URL": "http://localhost:4280"
+  }
+}

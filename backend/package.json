@@ -1,0 +1,26 @@
+{
+  "name": "redarm-cheap-backend",
+  "version": "0.1.0",
+  "private": true,
+  "main": "src/index.js",
+  "description": "Low-cost Azure Functions backend for RedArm PDF Editor",
+  "scripts": {
+    "start": "func start",
+    "lint": "echo lint-not-configured",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@azure/ai-form-recognizer": "^5.0.0",
+    "@azure/core-auth": "^1.9.0",
+    "@azure/data-tables": "^13.3.1",
+    "@azure/functions": "^4.5.0",
+    "@azure/storage-blob": "^12.20.0",
+    "@azure/storage-queue": "^12.18.0",
+    "bcryptjs": "^2.4.3",
+    "jsonwebtoken": "^9.0.2",
+    "uuid": "^11.0.5"
+  }
+}

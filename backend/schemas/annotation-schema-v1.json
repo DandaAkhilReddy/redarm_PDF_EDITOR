@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://redarm.local/schemas/annotation-schema-v1.json",
+  "title": "Annotation Schema v1",
+  "type": "object",
+  "required": ["schemaVersion", "operations"],
+  "properties": {
+    "schemaVersion": {
+      "const": "1.0"
+    },
+    "operations": {
+      "type": "array",
+      "maxItems": 1000,
+      "items": {
+        "type": "object",
+        "required": ["opId", "opType", "page", "bounds", "author", "ts"],
+        "properties": {
+          "opId": { "type": "string", "minLength": 1, "maxLength": 100 },
+          "opType": {
+            "type": "string",
+            "enum": ["highlight", "ink", "text", "shape", "redaction"]
+          },
+          "page": { "type": "integer", "minimum": 1 },
+          "bounds": {
+            "type": "object",
+            "required": ["x", "y", "w", "h"],
+            "properties": {
+              "x": { "type": "number" },
+              "y": { "type": "number" },
+              "w": { "type": "number", "exclusiveMinimum": 0 },
+              "h": { "type": "number", "exclusiveMinimum": 0 }
+            },
+            "additionalProperties": false
+          },
+          "author": { "type": "string", "format": "email" },
+          "color": { "type": "string" },
+          "payload": { "type": "object" },
+          "ts": { "type": "string", "format": "date-time" }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

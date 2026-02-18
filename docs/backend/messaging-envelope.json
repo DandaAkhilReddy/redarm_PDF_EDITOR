@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://redarm.local/schemas/messaging-envelope.json",
+  "title": "Queue Message Envelope",
+  "type": "object",
+  "required": ["event_id", "tenant_id", "doc_id", "event_type", "attempt", "created_utc", "trace_id"],
+  "properties": {
+    "event_id": { "type": "string" },
+    "tenant_id": { "type": "string" },
+    "doc_id": { "type": "string" },
+    "version_id": { "type": ["string", "null"] },
+    "event_type": { "type": "string" },
+    "attempt": { "type": "integer", "minimum": 0 },
+    "created_utc": { "type": "string", "format": "date-time" },
+    "trace_id": { "type": "string" },
+    "payload": { "type": "object" }
+  },
+  "additionalProperties": false
+}
