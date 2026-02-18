@@ -1,318 +1,210 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { GlobalWorkerOptions, getDocument } from "pdfjs-dist";
-import workerSrc from "pdfjs-dist/build/pdf.worker.min.mjs?url";
-import type { AnnotationOperation, JobResponse, LoginResponse, UploadResponse } from "./types";
-
-GlobalWorkerOptions.workerSrc = workerSrc;
-
-const API_BASE = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, "") || "";
-
-function apiUrl(path: string): string {
-  if (!API_BASE) {
-    return `/api${path}`;
-  }
-  return `${API_BASE}/api${path}`;
-}
-
-async function apiJson<T>(path: string, method: string, token: string, body?: unknown): Promise<T> {
-  const response = await fetch(apiUrl(path), {
-    method,
-    headers: {
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      "Content-Type": "application/json"
-    },
-    body: body ? JSON.stringify(body) : undefined
-  });
-
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    const message = (payload as any)?.error?.message || `Request failed (${response.status})`;
-    throw new Error(message);
-  }
-  return payload as T;
-}
+import { useState, useCallback, useEffect } from "react";
+import { useAuth } from "./hooks/useAuth";
+import { usePDF } from "./hooks/usePDF";
+import { useAnnotations } from "./hooks/useAnnotations";
+import { useJobs } from "./hooks/useJobs";
+import { LoginPage } from "./components/auth/LoginPage";
+import { Header } from "./components/layout/Header";
+import { EditorLayout } from "./components/layout/EditorLayout";
+import { Sidebar } from "./components/layout/Sidebar";
+import { Toolbar } from "./components/editor/Toolbar";
+import { PDFViewer } from "./components/editor/PDFViewer";
+import { AnnotationPanel } from "./components/editor/AnnotationPanel";
+import { JobsPanel } from "./components/editor/JobsPanel";
+import { ToastContainer } from "./components/ui/Toast";
+import { apiJson, uploadBlob } from "./lib/api";
+import type { Theme, Toast, UploadResponse } from "./types";
 
 export default function App() {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [token, setToken] = useState("");
-  const [userEmail, setUserEmail] = useState("");
-  const [docId, setDocId] = useState("");
-  const [readUrl, setReadUrl] = useState("");
-  const [message, setMessage] = useState("");
-  const [error, setError] = useState("");
-  const [jobs, setJobs] = useState<JobResponse[]>([]);
-  const [ops, setOps] = useState<AnnotationOperation[]>([]);
-  const [opType, setOpType] = useState<AnnotationOperation["opType"]>("highlight");
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  // Auth
+  const { auth, login, logout, isLoggingIn } = useAuth();
 
-  const canUseEditor = useMemo(() => token.length > 0 && docId.length > 0, [token, docId]);
+  // PDF viewer
+  const pdf = usePDF();
+
+  // Annotations & jobs (only active when authenticated + doc loaded)
+  const annotations = useAnnotations(auth.token, docId(), auth.email);
+  const jobs = useJobs(auth.token, docId());
+
+  // Theme (persisted to localStorage)
+  const [theme, setTheme] = useState<Theme>(() => {
+    return (localStorage.getItem("redarm_theme") as Theme) || "light";
+  });
 
   useEffect(() => {
-    if (!readUrl || !canvasRef.current) {
-      return;
-    }
+    document.documentElement.className = theme;
+    localStorage.setItem("redarm_theme", theme);
+  }, [theme]);
 
-    let cancelled = false;
-    const render = async () => {
-      try {
-        const loadingTask = getDocument(readUrl);
-        const pdf = await loadingTask.promise;
-        const page = await pdf.getPage(1);
-        const viewport = page.getViewport({ scale: 1.1 });
-        const canvas = canvasRef.current;
-        if (!canvas || cancelled) {
-          return;
-        }
-        const ctx = canvas.getContext("2d");
-        if (!ctx) {
-          return;
-        }
-        canvas.width = Math.floor(viewport.width);
-        canvas.height = Math.floor(viewport.height);
-        await page.render({ canvasContext: ctx, viewport }).promise;
-      } catch (err) {
-        if (!cancelled) {
-          setError(`Failed to render PDF: ${(err as Error).message}`);
-        }
+  const toggleTheme = useCallback(() => {
+    setTheme((t) => (t === "light" ? "dark" : "light"));
+  }, []);
+
+  // Toasts
+  const [toasts, setToasts] = useState<Toast[]>([]);
+
+  const addToast = useCallback((type: Toast["type"], message: string) => {
+    setToasts((prev) => [...prev, { id: crypto.randomUUID(), type, message }]);
+  }, []);
+
+  const dismissToast = useCallback((id: string) => {
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  }, []);
+
+  // Document state
+  const [currentDocId, setCurrentDocId] = useState("");
+  const [fileName, setFileName] = useState("");
+
+  function docId() {
+    return currentDocId;
+  }
+
+  // Upload handler
+  const handleUpload = useCallback(
+    async (file: File) => {
+      const MAX_SIZE = 10 * 1024 * 1024;
+      if (file.size > MAX_SIZE) {
+        addToast("error", `File too large (${(file.size / 1024 / 1024).toFixed(1)} MB). Max is 10 MB.`);
+        return;
       }
-    };
-
-    render();
-    return () => {
-      cancelled = true;
-    };
-  }, [readUrl]);
-
-  const jobsRef = useRef(jobs);
-  jobsRef.current = jobs;
-
-  useEffect(() => {
-    if (!token) {
-      return;
-    }
-
-    const timer = setInterval(async () => {
-      const currentJobs = jobsRef.current;
-      const active = currentJobs.filter((j) => j.status === "queued" || j.status === "running");
-      if (active.length === 0) {
+      if (file.type && file.type !== "application/pdf") {
+        addToast("error", "Only PDF files are supported.");
         return;
       }
 
-      const refreshed: JobResponse[] = [];
-      for (const job of currentJobs) {
-        if (job.status !== "queued" && job.status !== "running") {
-          refreshed.push(job);
-          continue;
-        }
-        try {
-          const updated = await apiJson<JobResponse>(`/jobs/${job.jobId}`, "GET", token);
-          refreshed.push(updated);
-        } catch {
-          refreshed.push(job);
-        }
+      try {
+        const upload = await apiJson<UploadResponse>(
+          "/docs/upload-url", "POST", auth.token,
+          { fileName: file.name, contentType: file.type || "application/pdf" }
+        );
+        await uploadBlob(upload.sasUrl, file);
+        setCurrentDocId(upload.docId);
+        setFileName(file.name);
+        annotations.clearAnnotations();
+        await pdf.loadPDF(upload.readUrl);
+        addToast("success", `Uploaded ${file.name}`);
+      } catch (err) {
+        addToast("error", (err as Error).message);
       }
-      setJobs(refreshed);
-    }, 3000);
+    },
+    [auth.token, pdf, annotations, addToast]
+  );
 
-    return () => clearInterval(timer);
-  }, [token]);
-
-  const onLogin = async () => {
-    setError("");
-    setMessage("");
-
-    if (!email || !email.includes("@")) {
-      setError("Please enter a valid email address.");
-      return;
-    }
-    if (!password) {
-      setError("Password is required.");
-      return;
-    }
-
+  // Save handler
+  const handleSave = useCallback(async () => {
     try {
-      const result = await apiJson<LoginResponse>("/auth/login", "POST", "", { email, password });
-      setToken(result.accessToken);
-      setUserEmail(result.user.email);
-      setMessage(`Logged in as ${result.user.email}`);
+      const versionId = await annotations.saveAnnotations();
+      if (versionId) addToast("success", `Saved as ${versionId}`);
     } catch (err) {
-      setError((err as Error).message);
+      addToast("error", (err as Error).message);
     }
-  };
+  }, [annotations, addToast]);
 
-  const onUpload = async (file: File | null) => {
-    if (!file || !token) {
-      return;
-    }
-
-    const MAX_SIZE = 10 * 1024 * 1024;
-    if (file.size > MAX_SIZE) {
-      setError(`File too large (${(file.size / 1024 / 1024).toFixed(1)} MB). Maximum is ${MAX_SIZE / 1024 / 1024} MB.`);
-      return;
-    }
-
-    if (file.type && file.type !== "application/pdf") {
-      setError("Only PDF files are supported.");
-      return;
-    }
-
-    setError("");
-    setMessage("");
-
+  // Job handlers
+  const handleExport = useCallback(async () => {
     try {
-      const upload = await apiJson<UploadResponse>("/docs/upload-url", "POST", token, {
-        fileName: file.name,
-        contentType: file.type || "application/pdf"
-      });
-
-      const put = await fetch(upload.sasUrl, {
-        method: "PUT",
-        headers: {
-          "x-ms-blob-type": "BlockBlob",
-          "Content-Type": "application/pdf"
-        },
-        body: file
-      });
-
-      if (!put.ok) {
-        throw new Error(`Blob upload failed (${put.status})`);
-      }
-
-      setDocId(upload.docId);
-      setReadUrl(upload.readUrl);
-      setOps([]);
-      setMessage(`Uploaded ${file.name}. Document ID: ${upload.docId}`);
+      const jobId = await jobs.startJob("export");
+      if (jobId) addToast("info", `Export job queued: ${jobId}`);
     } catch (err) {
-      setError((err as Error).message);
+      addToast("error", (err as Error).message);
     }
-  };
+  }, [jobs, addToast]);
 
-  const addOperation = () => {
-    if (!userEmail) {
-      return;
-    }
-
-    const op: AnnotationOperation = {
-      opId: crypto.randomUUID(),
-      opType,
-      page: 1,
-      bounds: { x: 50, y: 50, w: 120, h: 40 },
-      author: userEmail,
-      payload: { note: `${opType} annotation` },
-      ts: new Date().toISOString()
-    };
-
-    setOps((prev) => [...prev, op]);
-  };
-
-  const saveAnnotations = async () => {
-    if (!canUseEditor) {
-      return;
-    }
-
+  const handleOCR = useCallback(async () => {
     try {
-      const payload = {
-        schemaVersion: "1.0",
-        operations: ops
-      };
-      const result = await apiJson<{ ok: boolean; versionId: string }>(`/docs/${docId}/save-annotation`, "POST", token, payload);
-      setMessage(`Annotations saved as ${result.versionId}`);
+      const jobId = await jobs.startJob("ocr");
+      if (jobId) addToast("info", `OCR job queued: ${jobId}`);
     } catch (err) {
-      setError((err as Error).message);
+      addToast("error", (err as Error).message);
     }
-  };
+  }, [jobs, addToast]);
 
-  const startJob = async (jobType: "ocr" | "export") => {
-    if (!canUseEditor) {
-      return;
-    }
+  // Add annotation from toolbar
+  const handleToolAnnotation = useCallback(() => {
+    const tool = annotations.activeTool;
+    if (tool === "select" || tool === "pan") return;
+    annotations.addAnnotation(tool, pdf.currentPage);
+  }, [annotations, pdf.currentPage]);
 
-    try {
-      const endpoint = jobType === "ocr" ? `/docs/${docId}/ocr` : `/docs/${docId}/export`;
-      const body = jobType === "ocr" ? { pages: "1" } : { format: "pdf" };
-      const result = await apiJson<{ jobId: string }>(endpoint, "POST", token, body);
-      setJobs((prev) => [{ jobId: result.jobId, status: "queued", type: jobType, resultUri: null, error: null, updatedAt: null }, ...prev]);
-      setMessage(`${jobType.toUpperCase()} job queued: ${result.jobId}`);
-    } catch (err) {
-      setError((err as Error).message);
-    }
-  };
+  const canEdit = auth.isAuthenticated && currentDocId.length > 0;
+
+  // --- Render ---
+
+  if (!auth.isAuthenticated) {
+    return (
+      <>
+        <LoginPage onLogin={login} isLoading={isLoggingIn} />
+        <ToastContainer toasts={toasts} onDismiss={dismissToast} />
+      </>
+    );
+  }
 
   return (
-    <div className="container">
-      <h1>RedArm PDF Editor (Cheap MVP)</h1>
-
-      <div className="card">
-        <h2>1) Login</h2>
-        <div className="row">
-          <input type="email" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} />
-          <input type="password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} />
-          <button onClick={onLogin}>Login</button>
-        </div>
-        <p className="small">Use BOOTSTRAP_ADMIN_EMAIL and BOOTSTRAP_ADMIN_PASSWORD for first login.</p>
-      </div>
-
-      <div className="card">
-        <h2>2) Upload PDF</h2>
-        <input
-          type="file"
-          accept="application/pdf"
-          disabled={!token}
-          onChange={(e) => onUpload(e.target.files?.[0] || null)}
-        />
-      </div>
-
-      <div className="card">
-        <h2>3) View and annotate</h2>
-        <canvas ref={canvasRef} />
-        <div className="row" style={{ marginTop: 12 }}>
-          <select value={opType} onChange={(e) => setOpType(e.target.value as AnnotationOperation["opType"])}>
-            <option value="highlight">highlight</option>
-            <option value="ink">ink</option>
-            <option value="text">text</option>
-            <option value="shape">shape</option>
-            <option value="redaction">redaction</option>
-          </select>
-          <button className="secondary" disabled={!canUseEditor} onClick={addOperation}>
-            Add Sample Annotation
-          </button>
-          <button disabled={!canUseEditor} onClick={saveAnnotations}>
-            Save Annotation Ops
-          </button>
-        </div>
-        <pre>{JSON.stringify({ schemaVersion: "1.0", operations: ops }, null, 2)}</pre>
-      </div>
-
-      <div className="card">
-        <h2>4) Manual Jobs</h2>
-        <div className="row">
-          <button disabled={!canUseEditor} onClick={() => startJob("export")}>
-            Export PDF
-          </button>
-          <button disabled={!canUseEditor} onClick={() => startJob("ocr")}
-            title="Requires Azure Document Intelligence to be configured on the backend">
-            Run OCR (Manual)
-          </button>
-        </div>
-        <div className="jobs" style={{ marginTop: 12 }}>
-          {jobs.map((job) => (
-            <div className="job-item" key={job.jobId}>
-              <strong>{job.type.toUpperCase()}</strong> - {job.status}
-              <div className="small">Job: {job.jobId}</div>
-              {job.resultUri ? (
-                <div>
-                  Result: <a href={job.resultUri} target="_blank" rel="noreferrer">open</a>
-                </div>
-              ) : null}
-              {job.error ? <div className="error">{job.error}</div> : null}
+    <div className="flex h-screen flex-col overflow-hidden">
+      <Header
+        fileName={fileName}
+        email={auth.email}
+        theme={theme}
+        onToggleTheme={toggleTheme}
+        onLogout={logout}
+      />
+      <EditorLayout
+        sidebar={
+          <Sidebar
+            totalPages={pdf.totalPages}
+            currentPage={pdf.currentPage}
+            onGoToPage={pdf.goToPage}
+            onUpload={handleUpload}
+            getThumbnail={pdf.getThumbnail}
+            isDocLoaded={currentDocId.length > 0}
+          />
+        }
+        toolbar={
+          <Toolbar
+            activeTool={annotations.activeTool}
+            onToolChange={(tool) => {
+              annotations.setActiveTool(tool);
+              if (tool !== "select" && tool !== "pan" && canEdit) {
+                annotations.addAnnotation(tool, pdf.currentPage);
+              }
+            }}
+            currentPage={pdf.currentPage}
+            totalPages={pdf.totalPages}
+            scale={pdf.scale}
+            onPrevPage={pdf.prevPage}
+            onNextPage={pdf.nextPage}
+            onZoomIn={pdf.zoomIn}
+            onZoomOut={pdf.zoomOut}
+            onSave={handleSave}
+            onExport={handleExport}
+            onOCR={handleOCR}
+            onClearAnnotations={annotations.clearAnnotations}
+            isSaving={annotations.isSaving}
+            canEdit={canEdit}
+          />
+        }
+        canvas={
+          <PDFViewer
+            canvasRef={pdf.canvasRef}
+            isLoading={pdf.isLoading}
+            hasDocument={currentDocId.length > 0}
+          />
+        }
+        rightPanel={
+          <div className="flex h-full flex-col">
+            <div className="flex-1 overflow-y-auto border-b border-slate-200 dark:border-slate-700">
+              <AnnotationPanel
+                annotations={annotations.ops}
+                onRemove={annotations.removeAnnotation}
+              />
             </div>
-          ))}
-        </div>
-      </div>
-
-      {message ? <p className="success">{message}</p> : null}
-      {error ? <p className="error">{error}</p> : null}
+            <div className="flex-1 overflow-y-auto">
+              <JobsPanel jobs={jobs.jobs} />
+            </div>
+          </div>
+        }
+      />
+      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </div>
   );
 }

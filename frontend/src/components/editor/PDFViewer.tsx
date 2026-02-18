@@ -1,4 +1,4 @@
-import type { RefObject } from "react";
+import React, { type RefObject } from "react";
 import { FileUp, Loader2 } from "lucide-react";
 
 interface PDFViewerProps {
@@ -33,7 +33,7 @@ export function PDFViewer({ canvasRef, isLoading, hasDocument }: PDFViewerProps)
           </div>
         )}
         <canvas
-          ref={canvasRef}
+          ref={canvasRef as React.RefObject<HTMLCanvasElement>}
           className="pdf-canvas rounded-lg shadow-xl ring-1 ring-slate-200 dark:ring-slate-700"
         />
       </div>
