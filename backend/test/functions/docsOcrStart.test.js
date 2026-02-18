@@ -1,13 +1,40 @@
 // backend/test/functions/docsOcrStart.test.js
 // Tests for POST /api/docs/{docId}/ocr  (backend/src/functions/docsOcrStart.js)
+//
+// Mocking strategy
+// ----------------
+// The handler destructures at load time:
+//   const { getDocument, createJob, isoNow } = require("../lib/tables");
+//   const { sendQueueMessage }               = require("../lib/storage");
+//
+// Because the references are captured at load time, monkey-patching the module
+// exports after the fact has no effect on the handler's closed-over locals.
+//
+// Instead, module-mocks.js injects thin wrapper objects into require.cache
+// BEFORE the handler source is required.  Each wrapper delegates to a
+// replaceable inner implementation, so individual tests can call
+// mm.setGetDocument(), mm.setCreateJob(), mm.setSendQueueMessage() to control
+// what the handler sees without any module reload.
+//
+// Critical require order:
+//   1. require('../_helpers/setup')          — sets env vars
+//   2. const mm = require('../_helpers/module-mocks')  — injects cache entries
+//   3. other test helpers
+//   4. handler capture + require of the source module
 
+// 1. Environment variables must be set first
 require('../_helpers/setup');
-const { describe, it, mock, beforeEach, afterEach } = require('node:test');
+
+// 2. Inject mock modules into require.cache BEFORE the handler is loaded
+const mm = require('../_helpers/module-mocks');
+
+// 3. Other test infrastructure
+const { describe, it, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
 const { createMockRequest, createAuthHeaders } = require('../_helpers/mocks');
 
 // ---------------------------------------------------------------------------
-// Capture the handler before the source module registers it with @azure/functions
+// 4. Capture the handler by intercepting app.http, then load the source module
 // ---------------------------------------------------------------------------
 let capturedHandler;
 const { app } = require('@azure/functions');
@@ -18,19 +45,19 @@ app.http = (name, opts) => {
 require('../../src/functions/docsOcrStart');
 app.http = origHttp;
 
+assert.ok(capturedHandler, 'docsOcrStart handler was not captured — check the registered name');
+
 // ---------------------------------------------------------------------------
-// Module references for mocking
+// Config (for the expected OCR queue name)
 // ---------------------------------------------------------------------------
-const tables  = require('../../src/lib/tables');
-const storage = require('../../src/lib/storage');
 const { config } = require('../../src/lib/config');
 
 // ---------------------------------------------------------------------------
 // Shared test fixtures
 // ---------------------------------------------------------------------------
-const OWNER_EMAIL  = 'admin@test.redarm';    // matches BOOTSTRAP_ADMIN_EMAIL in setup.js
-const OTHER_EMAIL  = 'other@test.redarm';
-const DOC_ID       = 'doc-abc-123';
+const OWNER_EMAIL = 'admin@test.redarm';   // matches BOOTSTRAP_ADMIN_EMAIL in setup.js
+const OTHER_EMAIL = 'other@test.redarm';
+const DOC_ID      = 'doc-abc-123';
 
 /** Build a realistic document entity owned by OWNER_EMAIL */
 function makeDoc(ownerEmail = OWNER_EMAIL) {
@@ -39,9 +66,9 @@ function makeDoc(ownerEmail = OWNER_EMAIL) {
 
 // ---------------------------------------------------------------------------
 // Helper: run handler with optional overrides
+// Sets up mm stubs, invokes handler, captures call arguments.
 // ---------------------------------------------------------------------------
 async function runHandler({ body = {}, headers, params, docStub = makeDoc() } = {}) {
-  // Default to authenticated as the document owner
   const authHeaders = headers ?? createAuthHeaders(OWNER_EMAIL);
 
   const req = createMockRequest({
@@ -51,26 +78,22 @@ async function runHandler({ body = {}, headers, params, docStub = makeDoc() } = 
     params: params ?? { docId: DOC_ID },
   });
 
-  // Stub tables.getDocument
-  const getDocumentStub = mock.method(tables, 'getDocument', async () => docStub);
-
-  // Stub tables.createJob (capture arguments for assertions)
+  // Capture createJob arguments
   let capturedJob = null;
-  const createJobStub = mock.method(tables, 'createJob', async (job) => {
-    capturedJob = job;
-  });
+  mm.setGetDocument(async () => docStub);
+  mm.setCreateJob(async (job) => { capturedJob = job; });
 
-  // Stub storage.sendQueueMessage (capture arguments for assertions)
-  let capturedQueue = null;
+  // Capture sendQueueMessage arguments
+  let capturedQueue   = null;
   let capturedPayload = null;
-  const sendQueueStub = mock.method(storage, 'sendQueueMessage', async (queueName, payload) => {
-    capturedQueue  = queueName;
+  mm.setSendQueueMessage(async (queueName, payload) => {
+    capturedQueue   = queueName;
     capturedPayload = payload;
   });
 
   const response = await capturedHandler(req);
 
-  return { response, capturedJob, capturedQueue, capturedPayload, getDocumentStub, createJobStub, sendQueueStub };
+  return { response, capturedJob, capturedQueue, capturedPayload };
 }
 
 // ---------------------------------------------------------------------------
@@ -79,8 +102,9 @@ async function runHandler({ body = {}, headers, params, docStub = makeDoc() } = 
 describe('docsOcrStart — POST /api/docs/{docId}/ocr', () => {
 
   afterEach(() => {
-    // Restore all mocks after each test so they do not bleed across tests.
-    mock.restoreAll();
+    // Reset all inner implementations to safe defaults after each test so
+    // they cannot bleed across tests.
+    mm.resetAll();
   });
 
   // -------------------------------------------------------------------------
@@ -88,10 +112,10 @@ describe('docsOcrStart — POST /api/docs/{docId}/ocr', () => {
   // -------------------------------------------------------------------------
   it('returns 401 when no Authorization header is provided', async () => {
     const req = createMockRequest({
-      method: 'POST',
-      body: {},
+      method:  'POST',
+      body:    {},
       headers: {},                    // no auth
-      params: { docId: DOC_ID },
+      params:  { docId: DOC_ID },
     });
 
     const response = await capturedHandler(req);
@@ -102,10 +126,10 @@ describe('docsOcrStart — POST /api/docs/{docId}/ocr', () => {
 
   it('returns 401 when bearer token is invalid / malformed', async () => {
     const req = createMockRequest({
-      method: 'POST',
-      body: {},
+      method:  'POST',
+      body:    {},
       headers: { authorization: 'Bearer this.is.not.a.valid.jwt' },
-      params: { docId: DOC_ID },
+      params:  { docId: DOC_ID },
     });
 
     const response = await capturedHandler(req);
@@ -119,13 +143,13 @@ describe('docsOcrStart — POST /api/docs/{docId}/ocr', () => {
   // -------------------------------------------------------------------------
   it('returns 404 when the document does not exist', async () => {
     // getDocument returns null → document not found
-    mock.method(tables, 'getDocument', async () => null);
+    mm.setGetDocument(async () => null);
 
     const req = createMockRequest({
-      method: 'POST',
-      body: {},
+      method:  'POST',
+      body:    {},
       headers: createAuthHeaders(OWNER_EMAIL),
-      params: { docId: 'nonexistent-doc' },
+      params:  { docId: 'nonexistent-doc' },
     });
 
     const response = await capturedHandler(req);
@@ -139,13 +163,13 @@ describe('docsOcrStart — POST /api/docs/{docId}/ocr', () => {
   // -------------------------------------------------------------------------
   it('returns 403 when the authenticated user does not own the document', async () => {
     // Document belongs to OTHER_EMAIL but the token is for OWNER_EMAIL
-    mock.method(tables, 'getDocument', async () => makeDoc(OTHER_EMAIL));
+    mm.setGetDocument(async () => makeDoc(OTHER_EMAIL));
 
     const req = createMockRequest({
-      method: 'POST',
-      body: {},
+      method:  'POST',
+      body:    {},
       headers: createAuthHeaders(OWNER_EMAIL),
-      params: { docId: DOC_ID },
+      params:  { docId: DOC_ID },
     });
 
     const response = await capturedHandler(req);
@@ -209,18 +233,19 @@ describe('docsOcrStart — POST /api/docs/{docId}/ocr', () => {
 
   it('returns 202 with a jobId when body is completely absent (bad JSON body)', async () => {
     // Simulate a request whose body throws on .json() — handler should fall back to {}
-    const authHeaders = createAuthHeaders(OWNER_EMAIL);
-    mock.method(tables, 'getDocument', async () => makeDoc());
-    mock.method(tables, 'createJob', async () => {});
-    mock.method(storage, 'sendQueueMessage', async () => {});
+    mm.setGetDocument(async () => makeDoc());
+    mm.setCreateJob(async () => {});
+    mm.setSendQueueMessage(async () => {});
 
     const req = {
       method: 'POST',
-      headers: { get: (k) => (k === 'authorization' ? authHeaders.authorization : null) },
+      headers: {
+        get: (k) => (k === 'authorization' ? createAuthHeaders(OWNER_EMAIL).authorization : null),
+      },
       params: { docId: DOC_ID },
-      query: new URLSearchParams(),
-      json: async () => { throw new SyntaxError('Unexpected end of JSON input'); },
-      text: async () => '',
+      query:  new URLSearchParams(),
+      json:   async () => { throw new SyntaxError('Unexpected end of JSON input'); },
+      text:   async () => '',
     };
 
     const response = await capturedHandler(req);
@@ -235,9 +260,9 @@ describe('docsOcrStart — POST /api/docs/{docId}/ocr', () => {
   it('calls createJob with type "ocr", status "queued", correct docId, ownerEmail and pages', async () => {
     const { capturedJob } = await runHandler({ body: { pages: '2,4' } });
 
-    assert.ok(capturedJob, 'createJob must have been called');
-    assert.equal(capturedJob.type,        'ocr');
-    assert.equal(capturedJob.status,      'queued');
+    assert.ok(capturedJob,                    'createJob must have been called');
+    assert.equal(capturedJob.type,       'ocr');
+    assert.equal(capturedJob.status,     'queued');
     assert.equal(capturedJob.docId,       DOC_ID);
     assert.equal(capturedJob.ownerEmail,  OWNER_EMAIL);
     assert.equal(capturedJob.pages,       '2,4');
