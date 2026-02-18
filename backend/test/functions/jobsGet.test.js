@@ -1,9 +1,36 @@
+// backend/test/functions/jobsGet.test.js
+//
+// Tests for GET /api/jobs/{jobId}  (jobs-get handler)
+//
+// Handler flow:
+//   1. requireAuth    — 401 if no/bad bearer token
+//   2. getJob(jobId)  — 404 if job row is not found
+//   3. ownerEmail check — 403 if job.ownerEmail != identity.email
+//   4. Returns 200 { jobId, status, type, resultUri, error, updatedAt }
+//
+// Mocking strategy
+// ----------------
+// The handler destructures tables.js at require-time:
+//   const { getJob } = require('../lib/tables');
+//
+// Monkey-patching the module object after the fact never reaches the handler's
+// closed-over local reference.  Instead we use module-mocks.js, which injects
+// a thin-wrapper fake into require.cache BEFORE the handler source is loaded.
+// The wrappers delegate to replaceable inner functions (_getJob etc.), so each
+// test can call mm.setGetJob(fn) to control what the fake returns.
+
+// ── 1. Setup env vars (must be first) ──────────────────────────────────────
 require('../_helpers/setup');
-const { describe, it, mock } = require('node:test');
+
+// ── 2. Module-mocks (MUST come before any source require) ──────────────────
+const mm = require('../_helpers/module-mocks');
+
+// ── 3. Test framework + helpers ────────────────────────────────────────────
+const { describe, it, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
 const { createMockRequest, createAuthHeaders } = require('../_helpers/mocks');
 
-// Capture the handler before the module registers it
+// ── 4. Capture handler then load source ────────────────────────────────────
 let capturedHandler;
 const { app } = require('@azure/functions');
 const origHttp = app.http;
@@ -11,14 +38,17 @@ app.http = (name, opts) => { if (name === 'jobs-get') capturedHandler = opts.han
 require('../../src/functions/jobsGet');
 app.http = origHttp;
 
-// Mock tables module so tests never touch real Azure Storage
-const tables = require('../../src/lib/tables');
+assert.ok(capturedHandler, 'jobs-get handler was not captured — check the registered name');
+
+// ── Tests ───────────────────────────────────────────────────────────────────
 
 describe('GET /api/jobs/{jobId} — jobsGet handler', () => {
-  // Helper: reset the getJob mock before each relevant test
-  function mockGetJob(returnValue) {
-    mock.method(tables, 'getJob', async () => returnValue);
-  }
+
+  afterEach(() => {
+    mm.resetAll();
+  });
+
+  // ── Authentication guard ────────────────────────────────────────────────
 
   it('returns 401 when no Authorization header is provided', async () => {
     const req = createMockRequest({ method: 'GET', params: { jobId: 'job-001' } });
@@ -40,8 +70,10 @@ describe('GET /api/jobs/{jobId} — jobsGet handler', () => {
     assert.equal(res.jsonBody.error.code, 'unauthorized');
   });
 
+  // ── Job lookup ──────────────────────────────────────────────────────────
+
   it('returns 404 when the job does not exist', async () => {
-    mockGetJob(null);
+    mm.setGetJob(async () => null);
 
     const req = createMockRequest({
       method: 'GET',
@@ -54,8 +86,10 @@ describe('GET /api/jobs/{jobId} — jobsGet handler', () => {
     assert.equal(res.jsonBody.error.code, 'not_found');
   });
 
+  // ── Ownership check ─────────────────────────────────────────────────────
+
   it('returns 403 when the authenticated user does not own the job', async () => {
-    mockGetJob({
+    mm.setGetJob(async () => ({
       jobId: 'job-002',
       ownerEmail: 'other@test.redarm',
       status: 'completed',
@@ -63,7 +97,7 @@ describe('GET /api/jobs/{jobId} — jobsGet handler', () => {
       resultUri: 'https://storage.example.com/result.pdf',
       error: null,
       updatedAt: '2026-02-18T10:00:00.000Z'
-    });
+    }));
 
     const req = createMockRequest({
       method: 'GET',
@@ -76,6 +110,8 @@ describe('GET /api/jobs/{jobId} — jobsGet handler', () => {
     assert.equal(res.jsonBody.error.code, 'forbidden');
   });
 
+  // ── Success responses ───────────────────────────────────────────────────
+
   it('returns 200 with correct job details for a completed job', async () => {
     const jobData = {
       jobId: 'job-003',
@@ -86,7 +122,7 @@ describe('GET /api/jobs/{jobId} — jobsGet handler', () => {
       error: null,
       updatedAt: '2026-02-18T12:30:00.000Z'
     };
-    mockGetJob(jobData);
+    mm.setGetJob(async () => jobData);
 
     const req = createMockRequest({
       method: 'GET',
@@ -105,7 +141,7 @@ describe('GET /api/jobs/{jobId} — jobsGet handler', () => {
   });
 
   it('returns 200 with null resultUri for a queued job', async () => {
-    mockGetJob({
+    mm.setGetJob(async () => ({
       jobId: 'job-004',
       ownerEmail: 'user@test.redarm',
       status: 'queued',
@@ -113,7 +149,7 @@ describe('GET /api/jobs/{jobId} — jobsGet handler', () => {
       resultUri: undefined,
       error: null,
       updatedAt: '2026-02-18T13:00:00.000Z'
-    });
+    }));
 
     const req = createMockRequest({
       method: 'GET',
@@ -129,7 +165,7 @@ describe('GET /api/jobs/{jobId} — jobsGet handler', () => {
   });
 
   it('returns 200 with an error field for a failed job', async () => {
-    mockGetJob({
+    mm.setGetJob(async () => ({
       jobId: 'job-005',
       ownerEmail: 'admin@test.redarm',
       status: 'failed',
@@ -137,7 +173,7 @@ describe('GET /api/jobs/{jobId} — jobsGet handler', () => {
       resultUri: null,
       error: 'PDF rendering timeout exceeded',
       updatedAt: '2026-02-18T14:00:00.000Z'
-    });
+    }));
 
     const req = createMockRequest({
       method: 'GET',
@@ -152,8 +188,10 @@ describe('GET /api/jobs/{jobId} — jobsGet handler', () => {
     assert.equal(res.jsonBody.error, 'PDF rendering timeout exceeded');
   });
 
+  // ── Default-value edge cases ────────────────────────────────────────────
+
   it('defaults status to "unknown" when the job row has no status field', async () => {
-    mockGetJob({
+    mm.setGetJob(async () => ({
       jobId: 'job-006',
       ownerEmail: 'user@test.redarm',
       // status intentionally omitted
@@ -161,7 +199,7 @@ describe('GET /api/jobs/{jobId} — jobsGet handler', () => {
       resultUri: null,
       error: null,
       updatedAt: '2026-02-18T15:00:00.000Z'
-    });
+    }));
 
     const req = createMockRequest({
       method: 'GET',
@@ -175,7 +213,7 @@ describe('GET /api/jobs/{jobId} — jobsGet handler', () => {
   });
 
   it('defaults type to empty string when the job row has no type field', async () => {
-    mockGetJob({
+    mm.setGetJob(async () => ({
       jobId: 'job-007',
       ownerEmail: 'user@test.redarm',
       status: 'queued',
@@ -183,7 +221,7 @@ describe('GET /api/jobs/{jobId} — jobsGet handler', () => {
       resultUri: null,
       error: null,
       updatedAt: '2026-02-18T15:30:00.000Z'
-    });
+    }));
 
     const req = createMockRequest({
       method: 'GET',
