@@ -7,7 +7,7 @@
   "scripts": {
     "start": "func start",
     "lint": "echo lint-not-configured",
-    "test": "node --test"
+    "test": "node --test 'test/**/*.test.js'"
   },
   "engines": {
     "node": ">=20"
