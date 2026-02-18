@@ -22,9 +22,13 @@ export default function App() {
   // PDF viewer
   const pdf = usePDF();
 
+  // Document state (must be declared before hooks that reference currentDocId)
+  const [currentDocId, setCurrentDocId] = useState("");
+  const [fileName, setFileName] = useState("");
+
   // Annotations & jobs (only active when authenticated + doc loaded)
-  const annotations = useAnnotations(auth.token, docId(), auth.email);
-  const jobs = useJobs(auth.token, docId());
+  const annotations = useAnnotations(auth.token, currentDocId, auth.email);
+  const jobs = useJobs(auth.token, currentDocId);
 
   // Theme (persisted to localStorage)
   const [theme, setTheme] = useState<Theme>(() => {
@@ -50,14 +54,6 @@ export default function App() {
   const dismissToast = useCallback((id: string) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
-
-  // Document state
-  const [currentDocId, setCurrentDocId] = useState("");
-  const [fileName, setFileName] = useState("");
-
-  function docId() {
-    return currentDocId;
-  }
 
   // Upload handler
   const handleUpload = useCallback(
