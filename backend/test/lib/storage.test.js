@@ -192,26 +192,31 @@ describe('storage module', () => {
     });
   });
 
-  describe('async functions exist and are thenable', () => {
-    // We do not invoke these because they require a live Azurite instance.
-    // We verify they are async (return a Promise when called with wrong args
-    // would require catching, so we just confirm they are functions — already
-    // covered by the exports suite above — and that their return value is a
-    // Promise-like when invoked. We skip actual invocation here.)
-
-    it('ensureContainer returns a Promise when called', () => {
-      const result = storage.ensureContainer('nonexistent-container-xyz');
-      assert.ok(result !== null && typeof result === 'object' && typeof result.then === 'function',
-        'ensureContainer should return a Promise');
-      // Suppress the unhandled rejection from the failed network call.
-      result.catch(() => {});
+  describe('async function signatures', () => {
+    // Verify async functions without making real network calls (no Azurite needed)
+    it('ensureContainer is an AsyncFunction', () => {
+      assert.equal(storage.ensureContainer.constructor.name, 'AsyncFunction',
+        'ensureContainer should be an async function');
     });
 
-    it('sendQueueMessage returns a Promise when called', () => {
-      const result = storage.sendQueueMessage('nonexistent-queue-xyz', { test: true });
-      assert.ok(result !== null && typeof result === 'object' && typeof result.then === 'function',
-        'sendQueueMessage should return a Promise');
-      result.catch(() => {});
+    it('sendQueueMessage is an AsyncFunction', () => {
+      assert.equal(storage.sendQueueMessage.constructor.name, 'AsyncFunction',
+        'sendQueueMessage should be an async function');
+    });
+
+    it('uploadJson is an AsyncFunction', () => {
+      assert.equal(storage.uploadJson.constructor.name, 'AsyncFunction',
+        'uploadJson should be an async function');
+    });
+
+    it('downloadToBuffer is an AsyncFunction', () => {
+      assert.equal(storage.downloadToBuffer.constructor.name, 'AsyncFunction',
+        'downloadToBuffer should be an async function');
+    });
+
+    it('uploadBuffer is an AsyncFunction', () => {
+      assert.equal(storage.uploadBuffer.constructor.name, 'AsyncFunction',
+        'uploadBuffer should be an async function');
     });
   });
 });

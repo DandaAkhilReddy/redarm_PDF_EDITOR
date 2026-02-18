@@ -19,6 +19,9 @@ const { createToken } = require('../../src/lib/auth');
 
 // ---------------------------------------------------------------------------
 // Capture handlers from multiple function modules
+// NOTE: This relies on Node.js `node --test` per-file process isolation
+// (the default). If running in shared-process mode, handlers would need
+// require.cache cleanup before re-requiring (see job-lifecycle.test.js).
 // ---------------------------------------------------------------------------
 const handlers = {};
 
@@ -36,6 +39,7 @@ require('../../src/functions/docsUploadUrl');
 require('../../src/functions/docsSaveAnnotation');
 require('../../src/functions/jobsGet');
 require('../../src/functions/docsExportStart');
+require('../../src/functions/docsOcrStart');
 
 // Restore immediately
 realFunctions.app.http = originalHttp;
@@ -46,6 +50,7 @@ assert.ok(handlers['docs-upload-url'], 'docs-upload-url handler was not captured
 assert.ok(handlers['docs-save-annotation'], 'docs-save-annotation handler was not captured');
 assert.ok(handlers['jobs-get'], 'jobs-get handler was not captured');
 assert.ok(handlers['docs-export-start'], 'docs-export-start handler was not captured');
+assert.ok(handlers['docs-ocr-start'], 'docs-ocr-start handler was not captured');
 
 // ---------------------------------------------------------------------------
 // Shared test data

@@ -3,11 +3,14 @@
 // config.js calls required("STORAGE_CONNECTION_STRING") at module load time,
 // which throws if the env var is missing. Set all env vars here first.
 
+// Azurite well-known development key — NOT a real secret.
+// See https://learn.microsoft.com/en-us/azure/storage/common/storage-use-azurite#well-known-storage-account-and-key
 process.env.STORAGE_CONNECTION_STRING = 'DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://127.0.0.1:10000/devstoreaccount1;QueueEndpoint=http://127.0.0.1:10001/devstoreaccount1;TableEndpoint=http://127.0.0.1:10002/devstoreaccount1';
 process.env.JWT_SECRET = 'test-jwt-secret-key-that-is-at-least-32-characters-long-for-testing';
 process.env.BOOTSTRAP_ADMIN_EMAIL = 'admin@test.redarm';
 process.env.BOOTSTRAP_ADMIN_PASSWORD = 'TestPassword123!';
 process.env.STORAGE_ACCOUNT_NAME = 'devstoreaccount1';
+// Azurite well-known development key — NOT a real secret.
 process.env.STORAGE_ACCOUNT_KEY = 'Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==';
 process.env.FUNCTIONS_WORKER_RUNTIME = 'node';
 process.env.TABLE_USERS = 'users';

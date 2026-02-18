@@ -30,7 +30,10 @@ describe('Input', () => {
 
   it('does not render error message when error prop is absent', () => {
     render(<Input />);
-    expect(screen.queryByRole('paragraph')).not.toBeInTheDocument();
+    // queryByRole('paragraph') does not work for <p> in jsdom — use queryByText instead
+    expect(screen.queryByText(/this field/i)).not.toBeInTheDocument();
+    // Also verify no error paragraph exists by checking for the error CSS class
+    expect(document.querySelector('.text-red-500')).toBeNull();
   });
 
   it('renders icon when icon prop is provided', () => {

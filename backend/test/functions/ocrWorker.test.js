@@ -62,12 +62,16 @@ function encodeMessage(payload) {
   return Buffer.from(JSON.stringify(payload), 'utf8').toString('base64');
 }
 
-/** Convenience: run handler and swallow re-throws so assertions can continue. */
+/**
+ * Convenience: run handler and capture any thrown error.
+ * Returns { error } so callers can assert on whether the handler threw.
+ */
 async function runHandler(message, context) {
   try {
     await capturedHandler(message, context);
-  } catch (_) {
-    // intentionally ignored — callers that care about the throw use assert.rejects
+    return { error: null };
+  } catch (err) {
+    return { error: err };
   }
 }
 
