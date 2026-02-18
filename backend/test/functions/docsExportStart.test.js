@@ -21,18 +21,28 @@
 // Because the references are captured at load time, monkey-patching the module
 // exports after the fact has no effect on the handler's closed-over locals.
 //
-// Instead, we inject fake module objects directly into require.cache under the
-// resolved paths of tables.js and storage.js BEFORE requiring the handler
-// source.  The fake objects close over a shared "state" variable so each test
-// can configure what the fakes return without reloading any module.
+// Instead we use module-mocks.js which injects thin-wrapper fakes into
+// require.cache BEFORE the handler source is first loaded.  The wrappers
+// delegate to replaceable inner implementations (_getDocument, _createJob,
+// _sendQueueMessage) so each test can reconfigure behaviour via the mm.set*
+// API without ever reloading any module.
+//
+// CRITICAL require order:
+//   1. require('../_helpers/setup')                  — env vars
+//   2. const mm = require('../_helpers/module-mocks') — cache injection FIRST
+//   3. other test helpers
+//   4. handler capture + require handler source
 
+// 1. Environment variables — MUST be first
 require('../_helpers/setup');
 
+// 2. Module-mocks — MUST be before the handler is required
+const mm = require('../_helpers/module-mocks');
+
+// 3. Other test helpers
 const { describe, it, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
 const path   = require('path');
-const Module = require('module');
-
 const {
   createMockRequest,
   createBadJsonRequest,
@@ -40,92 +50,7 @@ const {
 } = require('../_helpers/mocks');
 
 // ---------------------------------------------------------------------------
-// Shared mutable state — each test calls resetState() to configure behaviour
-// ---------------------------------------------------------------------------
-const state = {
-  docToReturn:           undefined,  // null → not found, object → found
-  createJobError:        null,       // if set, createJob will throw this
-  sendQueueMessageError: null,       // if set, sendQueueMessage will throw this
-  // Call-capture arrays
-  getDocumentCalls:      [],
-  createJobCalls:        [],
-  sendQueueMessageCalls: [],
-};
-
-// We cannot call makeDoc() here yet because makeDoc() references TEST_DOC_ID
-// which is defined below.  resetState() is called inside each test instead.
-
-// ---------------------------------------------------------------------------
-// Resolve absolute paths of the modules we need to fake
-// ---------------------------------------------------------------------------
-const backendSrc = path.resolve(__dirname, '../../src');
-const TABLES_PATH  = require.resolve(path.join(backendSrc, 'lib/tables'));
-const STORAGE_PATH = require.resolve(path.join(backendSrc, 'lib/storage'));
-
-// ---------------------------------------------------------------------------
-// Build fake modules whose functions close over `state`
-// ---------------------------------------------------------------------------
-function buildFakeTables() {
-  return {
-    isoNow:         () => new Date().toISOString(),
-    getDocument:    async (docId) => {
-      state.getDocumentCalls.push({ docId });
-      return state.docToReturn;
-    },
-    createJob:      async (job) => {
-      state.createJobCalls.push({ job });
-      if (state.createJobError) throw state.createJobError;
-    },
-    // stubs for everything else tables.js exports
-    getUser:        async () => null,
-    upsertUser:     async () => {},
-    upsertDocument: async () => {},
-    getJob:         async () => null,
-    updateJob:      async () => {},
-    ensureTable:    async () => {},
-    getTableClient: () => ({}),
-    normalizeEmail: (e) => String(e || '').trim().toLowerCase(),
-  };
-}
-
-function buildFakeStorage() {
-  return {
-    sendQueueMessage: async (queueName, payload) => {
-      state.sendQueueMessageCalls.push({ queueName, payload });
-      if (state.sendQueueMessageError) throw state.sendQueueMessageError;
-    },
-    ensureContainer:  async () => {},
-    buildBlobSasUrl:  () => ({ url: 'http://mock-blob', expiresOn: new Date().toISOString() }),
-    uploadJson:       async () => {},
-    downloadToBuffer: async () => Buffer.from(''),
-    uploadBuffer:     async () => {},
-  };
-}
-
-// ---------------------------------------------------------------------------
-// Inject fakes into require.cache BEFORE requiring the handler
-// ---------------------------------------------------------------------------
-function makeRequireCacheEntry(resolvedPath, exportsObj) {
-  return {
-    id:       resolvedPath,
-    filename: resolvedPath,
-    loaded:   true,
-    exports:  exportsObj,
-    parent:   null,
-    children: [],
-    paths:    [],
-  };
-}
-
-// Remove real modules from cache so our fakes are picked up
-delete require.cache[TABLES_PATH];
-delete require.cache[STORAGE_PATH];
-
-require.cache[TABLES_PATH]  = makeRequireCacheEntry(TABLES_PATH,  buildFakeTables());
-require.cache[STORAGE_PATH] = makeRequireCacheEntry(STORAGE_PATH, buildFakeStorage());
-
-// ---------------------------------------------------------------------------
-// Capture the handler by intercepting app.http before loading the source
+// 4. Capture the handler by intercepting app.http BEFORE loading the source
 // ---------------------------------------------------------------------------
 let capturedHandler;
 
@@ -135,8 +60,9 @@ app.http = (name, opts) => {
   if (name === 'docs-export-start') capturedHandler = opts.handler;
 };
 
-// Clear the handler's own module from cache so it re-requires (and picks up
-// our faked tables/storage) even if it was loaded earlier.
+// Clear the handler's own cache entry so it re-requires and picks up the
+// module-mocks fakes for tables/storage.
+const backendSrc  = path.resolve(__dirname, '../../src');
 const HANDLER_PATH = require.resolve(path.join(backendSrc, 'functions/docsExportStart'));
 delete require.cache[HANDLER_PATH];
 require('../../src/functions/docsExportStart');
@@ -172,15 +98,6 @@ function authHeaders(email = TEST_EMAIL) {
   return createAuthHeaders(email);
 }
 
-function resetState({ doc = makeDoc(), createJobError = null, sendQueueMessageError = null } = {}) {
-  state.docToReturn            = doc;
-  state.createJobError         = createJobError;
-  state.sendQueueMessageError  = sendQueueMessageError;
-  state.getDocumentCalls       = [];
-  state.createJobCalls         = [];
-  state.sendQueueMessageCalls  = [];
-}
-
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -188,8 +105,7 @@ function resetState({ doc = makeDoc(), createJobError = null, sendQueueMessageEr
 describe('docsExportStart — POST /api/docs/{docId}/export', () => {
 
   afterEach(() => {
-    // reset state so no test contaminates the next
-    resetState();
+    mm.resetAll();
   });
 
   // -------------------------------------------------------------------------
@@ -197,7 +113,8 @@ describe('docsExportStart — POST /api/docs/{docId}/export', () => {
   // -------------------------------------------------------------------------
   describe('Authentication', () => {
     it('returns 401 when Authorization header is absent', async () => {
-      resetState();
+      mm.setGetDocument(async () => makeDoc());
+
       const req = createMockRequest({
         method:  'POST',
         params:  { docId: TEST_DOC_ID },
@@ -209,11 +126,11 @@ describe('docsExportStart — POST /api/docs/{docId}/export', () => {
 
       assert.equal(res.status, 401, 'Expected HTTP 401');
       assert.equal(res.jsonBody.error.code, 'unauthorized');
-      assert.equal(state.getDocumentCalls.length, 0, 'getDocument must not be called without auth');
     });
 
     it('returns 401 when bearer token is invalid or tampered', async () => {
-      resetState();
+      mm.setGetDocument(async () => makeDoc());
+
       const req = createMockRequest({
         method:  'POST',
         params:  { docId: TEST_DOC_ID },
@@ -225,7 +142,6 @@ describe('docsExportStart — POST /api/docs/{docId}/export', () => {
 
       assert.equal(res.status, 401);
       assert.equal(res.jsonBody.error.code, 'unauthorized');
-      assert.equal(state.getDocumentCalls.length, 0);
     });
   });
 
@@ -234,7 +150,13 @@ describe('docsExportStart — POST /api/docs/{docId}/export', () => {
   // -------------------------------------------------------------------------
   describe('Document lookup', () => {
     it('returns 404 when document does not exist', async () => {
-      resetState({ doc: null });
+      const getDocSpy  = mm.spy(async () => null);
+      const createJobSpy = mm.spy(async () => {});
+      const sendQueueSpy = mm.spy(async () => {});
+      mm.setGetDocument(getDocSpy);
+      mm.setCreateJob(createJobSpy);
+      mm.setSendQueueMessage(sendQueueSpy);
+
       const req = createMockRequest({
         method:  'POST',
         params:  { docId: 'nonexistent-doc' },
@@ -247,11 +169,11 @@ describe('docsExportStart — POST /api/docs/{docId}/export', () => {
       assert.equal(res.status, 404);
       assert.equal(res.jsonBody.error.code, 'not_found');
       // getDocument was called with the correct docId
-      assert.equal(state.getDocumentCalls.length, 1);
-      assert.equal(state.getDocumentCalls[0].docId, 'nonexistent-doc');
+      assert.equal(getDocSpy.calls.length, 1);
+      assert.equal(getDocSpy.calls[0][0], 'nonexistent-doc');
       // downstream steps must NOT run
-      assert.equal(state.createJobCalls.length, 0, 'createJob must not be called when document is missing');
-      assert.equal(state.sendQueueMessageCalls.length, 0, 'sendQueueMessage must not be called when document is missing');
+      assert.equal(createJobSpy.calls.length, 0, 'createJob must not be called when document is missing');
+      assert.equal(sendQueueSpy.calls.length, 0, 'sendQueueMessage must not be called when document is missing');
     });
   });
 
@@ -261,7 +183,12 @@ describe('docsExportStart — POST /api/docs/{docId}/export', () => {
   describe('Ownership check', () => {
     it('returns 403 when authenticated user does not own the document', async () => {
       // Document owned by OTHER_EMAIL, caller authenticated as TEST_EMAIL
-      resetState({ doc: makeDoc(OTHER_EMAIL) });
+      const createJobSpy = mm.spy(async () => {});
+      const sendQueueSpy = mm.spy(async () => {});
+      mm.setGetDocument(async () => makeDoc(OTHER_EMAIL));
+      mm.setCreateJob(createJobSpy);
+      mm.setSendQueueMessage(sendQueueSpy);
+
       const req = createMockRequest({
         method:  'POST',
         params:  { docId: TEST_DOC_ID },
@@ -273,12 +200,13 @@ describe('docsExportStart — POST /api/docs/{docId}/export', () => {
 
       assert.equal(res.status, 403);
       assert.equal(res.jsonBody.error.code, 'forbidden');
-      assert.equal(state.createJobCalls.length, 0, 'createJob must not be called when ownership check fails');
-      assert.equal(state.sendQueueMessageCalls.length, 0, 'sendQueueMessage must not be called when ownership check fails');
+      assert.equal(createJobSpy.calls.length, 0, 'createJob must not be called when ownership check fails');
+      assert.equal(sendQueueSpy.calls.length, 0, 'sendQueueMessage must not be called when ownership check fails');
     });
 
     it('returns 403 when document is owned by a completely different user', async () => {
-      resetState({ doc: makeDoc('completely@different.com') });
+      mm.setGetDocument(async () => makeDoc('completely@different.com'));
+
       const req = createMockRequest({
         method:  'POST',
         params:  { docId: TEST_DOC_ID },
@@ -297,7 +225,12 @@ describe('docsExportStart — POST /api/docs/{docId}/export', () => {
   // -------------------------------------------------------------------------
   describe('Format validation', () => {
     it('returns 400 when format is "docx" (unsupported)', async () => {
-      resetState();
+      const createJobSpy = mm.spy(async () => {});
+      const sendQueueSpy = mm.spy(async () => {});
+      mm.setGetDocument(async () => makeDoc());
+      mm.setCreateJob(createJobSpy);
+      mm.setSendQueueMessage(sendQueueSpy);
+
       const req = createMockRequest({
         method:  'POST',
         params:  { docId: TEST_DOC_ID },
@@ -310,12 +243,13 @@ describe('docsExportStart — POST /api/docs/{docId}/export', () => {
       assert.equal(res.status, 400);
       assert.equal(res.jsonBody.error.code, 'validation_error');
       assert.match(res.jsonBody.error.message, /pdf/i, 'Error message should mention "pdf"');
-      assert.equal(state.createJobCalls.length, 0, 'createJob must not be called for invalid format');
-      assert.equal(state.sendQueueMessageCalls.length, 0, 'sendQueueMessage must not be called for invalid format');
+      assert.equal(createJobSpy.calls.length, 0, 'createJob must not be called for invalid format');
+      assert.equal(sendQueueSpy.calls.length, 0, 'sendQueueMessage must not be called for invalid format');
     });
 
     it('returns 400 when format is "png" (unsupported)', async () => {
-      resetState();
+      mm.setGetDocument(async () => makeDoc());
+
       const req = createMockRequest({
         method:  'POST',
         params:  { docId: TEST_DOC_ID },
@@ -330,7 +264,11 @@ describe('docsExportStart — POST /api/docs/{docId}/export', () => {
     });
 
     it('defaults format to "pdf" when body.json() throws (invalid or empty body)', async () => {
-      resetState();
+      const sendQueueSpy = mm.spy(async () => {});
+      mm.setGetDocument(async () => makeDoc());
+      mm.setCreateJob(async () => {});
+      mm.setSendQueueMessage(sendQueueSpy);
+
       // createBadJsonRequest simulates a request whose .json() throws SyntaxError
       const req = createBadJsonRequest({
         method:  'POST',
@@ -343,15 +281,20 @@ describe('docsExportStart — POST /api/docs/{docId}/export', () => {
       // Handler catches the parse error and defaults to "pdf" — should succeed
       assert.equal(res.status, 202);
       assert.ok(res.jsonBody.jobId, 'Expected jobId in response');
+      assert.equal(sendQueueSpy.calls.length, 1);
       assert.equal(
-        state.sendQueueMessageCalls[0].payload.requestedFormat,
+        sendQueueSpy.calls[0][1].requestedFormat,
         'pdf',
         'Default requestedFormat should be "pdf"'
       );
     });
 
     it('defaults format to "pdf" when body omits the format field', async () => {
-      resetState();
+      const sendQueueSpy = mm.spy(async () => {});
+      mm.setGetDocument(async () => makeDoc());
+      mm.setCreateJob(async () => {});
+      mm.setSendQueueMessage(sendQueueSpy);
+
       const req = createMockRequest({
         method:  'POST',
         params:  { docId: TEST_DOC_ID },
@@ -362,11 +305,14 @@ describe('docsExportStart — POST /api/docs/{docId}/export', () => {
       const res = await capturedHandler(req);
 
       assert.equal(res.status, 202);
-      assert.equal(state.sendQueueMessageCalls[0].payload.requestedFormat, 'pdf');
+      assert.equal(sendQueueSpy.calls[0][1].requestedFormat, 'pdf');
     });
 
     it('accepts "PDF" (uppercase) by normalising to lowercase', async () => {
-      resetState();
+      mm.setGetDocument(async () => makeDoc());
+      mm.setCreateJob(async () => {});
+      mm.setSendQueueMessage(async () => {});
+
       const req = createMockRequest({
         method:  'POST',
         params:  { docId: TEST_DOC_ID },
@@ -385,7 +331,10 @@ describe('docsExportStart — POST /api/docs/{docId}/export', () => {
   // -------------------------------------------------------------------------
   describe('Success response', () => {
     it('returns 202 with a UUID v4 jobId on a valid request', async () => {
-      resetState();
+      mm.setGetDocument(async () => makeDoc());
+      mm.setCreateJob(async () => {});
+      mm.setSendQueueMessage(async () => {});
+
       const req = createMockRequest({
         method:  'POST',
         params:  { docId: TEST_DOC_ID },
@@ -410,7 +359,11 @@ describe('docsExportStart — POST /api/docs/{docId}/export', () => {
   // -------------------------------------------------------------------------
   describe('Job creation (createJob)', () => {
     it('calls createJob with type "export" and status "queued"', async () => {
-      resetState();
+      const createJobSpy = mm.spy(async () => {});
+      mm.setGetDocument(async () => makeDoc());
+      mm.setCreateJob(createJobSpy);
+      mm.setSendQueueMessage(async () => {});
+
       const req = createMockRequest({
         method:  'POST',
         params:  { docId: TEST_DOC_ID },
@@ -420,8 +373,8 @@ describe('docsExportStart — POST /api/docs/{docId}/export', () => {
 
       await capturedHandler(req);
 
-      assert.equal(state.createJobCalls.length, 1, 'createJob should be called exactly once');
-      const { job } = state.createJobCalls[0];
+      assert.equal(createJobSpy.calls.length, 1, 'createJob should be called exactly once');
+      const job = createJobSpy.calls[0][0];
 
       assert.equal(job.type,       'export', 'job.type must be "export"');
       assert.equal(job.status,     'queued', 'job.status must be "queued"');
@@ -434,7 +387,11 @@ describe('docsExportStart — POST /api/docs/{docId}/export', () => {
     });
 
     it('jobId stored by createJob matches jobId returned in the response', async () => {
-      resetState();
+      const createJobSpy = mm.spy(async () => {});
+      mm.setGetDocument(async () => makeDoc());
+      mm.setCreateJob(createJobSpy);
+      mm.setSendQueueMessage(async () => {});
+
       const req = createMockRequest({
         method:  'POST',
         params:  { docId: TEST_DOC_ID },
@@ -444,7 +401,7 @@ describe('docsExportStart — POST /api/docs/{docId}/export', () => {
 
       const res = await capturedHandler(req);
 
-      const { job } = state.createJobCalls[0];
+      const job = createJobSpy.calls[0][0];
       assert.equal(
         res.jsonBody.jobId,
         job.jobId,
@@ -458,7 +415,11 @@ describe('docsExportStart — POST /api/docs/{docId}/export', () => {
   // -------------------------------------------------------------------------
   describe('Queue message (sendQueueMessage)', () => {
     it('calls sendQueueMessage exactly once targeting the export queue', async () => {
-      resetState();
+      const sendQueueSpy = mm.spy(async () => {});
+      mm.setGetDocument(async () => makeDoc());
+      mm.setCreateJob(async () => {});
+      mm.setSendQueueMessage(sendQueueSpy);
+
       const req = createMockRequest({
         method:  'POST',
         params:  { docId: TEST_DOC_ID },
@@ -468,8 +429,8 @@ describe('docsExportStart — POST /api/docs/{docId}/export', () => {
 
       await capturedHandler(req);
 
-      assert.equal(state.sendQueueMessageCalls.length, 1, 'sendQueueMessage should be called exactly once');
-      const { queueName } = state.sendQueueMessageCalls[0];
+      assert.equal(sendQueueSpy.calls.length, 1, 'sendQueueMessage should be called exactly once');
+      const queueName = sendQueueSpy.calls[0][0];
       assert.equal(
         queueName,
         config.exportQueue,
@@ -478,7 +439,11 @@ describe('docsExportStart — POST /api/docs/{docId}/export', () => {
     });
 
     it('sendQueueMessage payload contains all required fields with correct values', async () => {
-      resetState();
+      const sendQueueSpy = mm.spy(async () => {});
+      mm.setGetDocument(async () => makeDoc());
+      mm.setCreateJob(async () => {});
+      mm.setSendQueueMessage(sendQueueSpy);
+
       const req = createMockRequest({
         method:  'POST',
         params:  { docId: TEST_DOC_ID },
@@ -488,7 +453,7 @@ describe('docsExportStart — POST /api/docs/{docId}/export', () => {
 
       const res = await capturedHandler(req);
 
-      const { payload } = state.sendQueueMessageCalls[0];
+      const payload = sendQueueSpy.calls[0][1];
       assert.equal(payload.jobId,           res.jsonBody.jobId, 'payload.jobId must match response jobId');
       assert.equal(payload.docId,           TEST_DOC_ID,        'payload.docId must match the request param');
       assert.equal(payload.ownerEmail,      TEST_EMAIL,         'payload.ownerEmail must match the token email');
