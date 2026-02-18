@@ -1,8 +1,16 @@
 // backend/test/functions/docsSaveAnnotation.test.js
 // Tests for POST /api/docs/{docId}/save-annotation
 
+// CRITICAL require order:
+//  1. setup  — env vars must be in place before any source module loads
+//  2. module-mocks — injects mock tables/storage into require.cache BEFORE
+//     the handler module is loaded (the handler destructures at require-time)
+//  3. everything else
+
 require('../_helpers/setup');
-const { describe, it, mock, beforeEach } = require('node:test');
+const mm = require('../_helpers/module-mocks');
+
+const { describe, it, beforeEach } = require('node:test');
 const assert = require('node:assert/strict');
 const { createMockRequest, createAuthHeaders, createBadJsonRequest } = require('../_helpers/mocks');
 
@@ -20,19 +28,11 @@ require('../../src/functions/docsSaveAnnotation');
 app.http = origHttp;
 
 // ---------------------------------------------------------------------------
-// Mock the tables module so tests never touch Azure Storage.
-// We replace getDocument and upsertDocument on the live module exports so
-// the already-loaded docsSaveAnnotation.js picks up the mocks via the same
-// require cache reference.
-// ---------------------------------------------------------------------------
-const tables = require('../../src/lib/tables');
-
-// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
 /** Build a request that has a valid Bearer token and a valid JSON body. */
-function makeValidRequest({ docId = 'doc-abc', operations = [], extraPayload = {}, ownerEmail } = {}) {
+function makeValidRequest({ docId = 'doc-abc', operations = [], extraPayload = {} } = {}) {
   return createMockRequest({
     method: 'POST',
     headers: createAuthHeaders('owner@test.redarm'),
@@ -53,8 +53,9 @@ function makeDocument({ ownerEmail = 'owner@test.redarm', version = 1 } = {}) {
 describe('docsSaveAnnotation handler — POST /api/docs/{docId}/save-annotation', () => {
 
   beforeEach(() => {
-    // Reset mocks before each test so state does not leak between cases.
-    mock.restoreAll();
+    // Reset all mock inner-implementations to their safe defaults before each test
+    // so state does not leak between cases.
+    mm.resetAll();
   });
 
   // -------------------------------------------------------------------------
@@ -205,9 +206,9 @@ describe('docsSaveAnnotation handler — POST /api/docs/{docId}/save-annotation'
   });
 
   it('accepts exactly 1000 operations without a validation error', async () => {
-    // Stub tables so the handler can proceed past validation.
-    mock.method(tables, 'getDocument', async () => makeDocument());
-    mock.method(tables, 'upsertDocument', async () => {});
+    // Set up mocks so the handler can proceed past validation.
+    mm.setGetDocument(async () => makeDocument());
+    mm.setUpsertDocument(async () => {});
 
     const ops = Array.from({ length: 1000 }, (_, i) => ({ id: i }));
     const req = createMockRequest({
@@ -227,7 +228,7 @@ describe('docsSaveAnnotation handler — POST /api/docs/{docId}/save-annotation'
   // 5. Document lookup
   // -------------------------------------------------------------------------
   it('returns 404 when the document does not exist', async () => {
-    mock.method(tables, 'getDocument', async () => null);
+    mm.setGetDocument(async () => null);
 
     const req = makeValidRequest({ docId: 'nonexistent-doc' });
     const res = await capturedHandler(req);
@@ -241,7 +242,7 @@ describe('docsSaveAnnotation handler — POST /api/docs/{docId}/save-annotation'
   // -------------------------------------------------------------------------
   it('returns 403 when authenticated user does not own the document', async () => {
     // Document is owned by a different email.
-    mock.method(tables, 'getDocument', async () => makeDocument({ ownerEmail: 'other@test.redarm' }));
+    mm.setGetDocument(async () => makeDocument({ ownerEmail: 'other@test.redarm' }));
 
     // The auth token is for owner@test.redarm — mismatch → 403.
     const req = makeValidRequest({ docId: 'doc-abc' });
@@ -251,10 +252,10 @@ describe('docsSaveAnnotation handler — POST /api/docs/{docId}/save-annotation'
     assert.equal(res.jsonBody.error.code, 'forbidden');
   });
 
-  it('returns 403 when ownerEmail case differs from authenticated email', async () => {
+  it('returns 200 when ownerEmail case differs from authenticated email (normalised)', async () => {
     // ownerEmail stored in mixed case — handler normalises both sides with toLowerCase.
-    mock.method(tables, 'getDocument', async () => makeDocument({ ownerEmail: 'OWNER@TEST.REDARM' }));
-    mock.method(tables, 'upsertDocument', async () => {});
+    mm.setGetDocument(async () => makeDocument({ ownerEmail: 'OWNER@TEST.REDARM' }));
+    mm.setUpsertDocument(async () => {});
 
     const req = makeValidRequest({ docId: 'doc-abc' });
     const res = await capturedHandler(req);
@@ -268,8 +269,8 @@ describe('docsSaveAnnotation handler — POST /api/docs/{docId}/save-annotation'
   // 7. Successful save — return shape
   // -------------------------------------------------------------------------
   it('returns 200 with ok:true and a versionId string on successful save', async () => {
-    mock.method(tables, 'getDocument', async () => makeDocument({ version: 1 }));
-    mock.method(tables, 'upsertDocument', async () => {});
+    mm.setGetDocument(async () => makeDocument({ version: 1 }));
+    mm.setUpsertDocument(async () => {});
 
     const req = makeValidRequest({ operations: [{ type: 'highlight' }] });
     const res = await capturedHandler(req);
@@ -283,8 +284,8 @@ describe('docsSaveAnnotation handler — POST /api/docs/{docId}/save-annotation'
   // 8. Version increment logic
   // -------------------------------------------------------------------------
   it('increments version from 1 to 2 (versionId = "v2")', async () => {
-    mock.method(tables, 'getDocument', async () => makeDocument({ version: 1 }));
-    mock.method(tables, 'upsertDocument', async () => {});
+    mm.setGetDocument(async () => makeDocument({ version: 1 }));
+    mm.setUpsertDocument(async () => {});
 
     const req = makeValidRequest();
     const res = await capturedHandler(req);
@@ -293,8 +294,8 @@ describe('docsSaveAnnotation handler — POST /api/docs/{docId}/save-annotation'
   });
 
   it('increments version from 5 to 6 (versionId = "v6")', async () => {
-    mock.method(tables, 'getDocument', async () => makeDocument({ version: 5 }));
-    mock.method(tables, 'upsertDocument', async () => {});
+    mm.setGetDocument(async () => makeDocument({ version: 5 }));
+    mm.setUpsertDocument(async () => {});
 
     const req = makeValidRequest();
     const res = await capturedHandler(req);
@@ -304,8 +305,8 @@ describe('docsSaveAnnotation handler — POST /api/docs/{docId}/save-annotation'
 
   it('passes the incremented version number to upsertDocument', async () => {
     let captured;
-    mock.method(tables, 'getDocument', async () => makeDocument({ version: 3 }));
-    mock.method(tables, 'upsertDocument', async (entity) => { captured = entity; });
+    mm.setGetDocument(async () => makeDocument({ version: 3 }));
+    mm.setUpsertDocument(async (entity) => { captured = entity; });
 
     const req = makeValidRequest();
     await capturedHandler(req);
@@ -319,8 +320,8 @@ describe('docsSaveAnnotation handler — POST /api/docs/{docId}/save-annotation'
   it('stores annotationJson as the JSON-stringified form of the full payload', async () => {
     const payload = { operations: [{ type: 'rect', page: 2 }], meta: 'test-meta' };
     let upsertArg;
-    mock.method(tables, 'getDocument', async () => makeDocument());
-    mock.method(tables, 'upsertDocument', async (entity) => { upsertArg = entity; });
+    mm.setGetDocument(async () => makeDocument());
+    mm.setUpsertDocument(async (entity) => { upsertArg = entity; });
 
     const req = createMockRequest({
       method: 'POST',
@@ -335,8 +336,8 @@ describe('docsSaveAnnotation handler — POST /api/docs/{docId}/save-annotation'
 
   it('passes the correct docId to upsertDocument', async () => {
     let upsertArg;
-    mock.method(tables, 'getDocument', async () => makeDocument());
-    mock.method(tables, 'upsertDocument', async (entity) => { upsertArg = entity; });
+    mm.setGetDocument(async () => makeDocument());
+    mm.setUpsertDocument(async (entity) => { upsertArg = entity; });
 
     const req = makeValidRequest({ docId: 'my-special-doc-id' });
     await capturedHandler(req);
