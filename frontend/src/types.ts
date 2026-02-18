@@ -34,3 +34,30 @@ export type AnnotationOperation = {
   payload?: Record<string, unknown>;
   ts: string;
 };
+
+// === New UI types ===
+
+export type Theme = "light" | "dark";
+
+export type PDFViewerState = {
+  totalPages: number;
+  currentPage: number;
+  scale: number;
+  isLoading: boolean;
+};
+
+export type AnnotationTool = AnnotationOperation["opType"] | "select" | "pan" | "eraser";
+
+export type Toast = {
+  id: string;
+  type: "success" | "error" | "info";
+  message: string;
+  duration?: number;
+};
+
+export type AuthState = {
+  token: string;
+  email: string;
+  role: string;
+  isAuthenticated: boolean;
+};

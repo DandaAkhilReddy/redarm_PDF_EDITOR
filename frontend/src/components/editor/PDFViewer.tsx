@@ -1,13 +1,38 @@
 import React, { type RefObject } from "react";
 import { FileUp, Loader2 } from "lucide-react";
+import { AnnotationOverlay } from "./AnnotationOverlay";
+import type { AnnotationOperation, AnnotationTool } from "../../types";
 
 interface PDFViewerProps {
   canvasRef: RefObject<HTMLCanvasElement | null>;
   isLoading: boolean;
   hasDocument: boolean;
+  annotations: AnnotationOperation[];
+  currentPage: number;
+  zoom: number;
+  activeTool: AnnotationTool;
+  onAnnotationCreated: (
+    opType: AnnotationOperation["opType"],
+    page: number,
+    bounds: { x: number; y: number; w: number; h: number },
+    payload?: Record<string, unknown>,
+  ) => void;
+  onAnnotationErased?: (opId: string) => void;
+  onAnnotationUpdated?: (opId: string, updates: { payload?: Record<string, unknown> }) => void;
 }
 
-export function PDFViewer({ canvasRef, isLoading, hasDocument }: PDFViewerProps) {
+export function PDFViewer({
+  canvasRef,
+  isLoading,
+  hasDocument,
+  annotations,
+  currentPage,
+  zoom,
+  activeTool,
+  onAnnotationCreated,
+  onAnnotationErased,
+  onAnnotationUpdated,
+}: PDFViewerProps) {
   if (!hasDocument) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-4 text-center">
@@ -35,6 +60,15 @@ export function PDFViewer({ canvasRef, isLoading, hasDocument }: PDFViewerProps)
         <canvas
           ref={canvasRef as React.RefObject<HTMLCanvasElement>}
           className="pdf-canvas rounded-lg shadow-xl ring-1 ring-slate-200 dark:ring-slate-700"
+        />
+        <AnnotationOverlay
+          annotations={annotations}
+          currentPage={currentPage}
+          zoom={zoom}
+          activeTool={activeTool}
+          onAnnotationCreated={onAnnotationCreated}
+          onAnnotationErased={onAnnotationErased}
+          onAnnotationUpdated={onAnnotationUpdated}
         />
       </div>
     </div>

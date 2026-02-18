@@ -183,6 +183,50 @@ describe('useAnnotations', () => {
     expect(apiJson).not.toHaveBeenCalled();
   });
 
+  it('exposes setOps for direct state manipulation (used by undo/redo)', () => {
+    const { result } = renderHook(() => useAnnotations(TOKEN, DOC_ID, AUTHOR));
+
+    expect(typeof result.current.setOps).toBe('function');
+
+    act(() => {
+      result.current.addAnnotation('highlight', 1);
+    });
+
+    expect(result.current.ops).toHaveLength(1);
+
+    act(() => {
+      result.current.setOps([]);
+    });
+
+    expect(result.current.ops).toHaveLength(0);
+  });
+
+  it('setOps can restore a previous state snapshot', () => {
+    const { result } = renderHook(() => useAnnotations(TOKEN, DOC_ID, AUTHOR));
+
+    let op1: ReturnType<typeof result.current.addAnnotation>;
+    act(() => {
+      op1 = result.current.addAnnotation('highlight', 1);
+      result.current.addAnnotation('text', 2);
+    });
+
+    expect(result.current.ops).toHaveLength(2);
+    const snapshot = [...result.current.ops];
+
+    act(() => {
+      result.current.clearAnnotations();
+    });
+
+    expect(result.current.ops).toHaveLength(0);
+
+    act(() => {
+      result.current.setOps(snapshot);
+    });
+
+    expect(result.current.ops).toHaveLength(2);
+    expect(result.current.ops[0].opId).toBe(op1!.opId);
+  });
+
   it('saveAnnotations sets isSaving to true during the request and false after', async () => {
     let resolveSave!: (value: unknown) => void;
     const savePromise = new Promise((resolve) => { resolveSave = resolve; });

@@ -8,6 +8,9 @@ import {
   Type,
   Square,
   EyeOff,
+  Eraser,
+  Undo2,
+  Redo2,
   ChevronLeft,
   ChevronRight,
   ZoomIn,
@@ -33,6 +36,10 @@ interface ToolbarProps {
   onExport: () => void;
   onOCR: () => void;
   onClearAnnotations: () => void;
+  onUndo: () => void;
+  onRedo: () => void;
+  canUndo: boolean;
+  canRedo: boolean;
   isSaving: boolean;
   canEdit: boolean;
 }
@@ -45,6 +52,7 @@ const tools: { id: AnnotationTool; icon: typeof MousePointer2; label: string }[]
   { id: "text", icon: Type, label: "Text" },
   { id: "shape", icon: Square, label: "Shape" },
   { id: "redaction", icon: EyeOff, label: "Redact" },
+  { id: "eraser", icon: Eraser, label: "Eraser" },
 ];
 
 export function Toolbar({
@@ -61,6 +69,10 @@ export function Toolbar({
   onExport,
   onOCR,
   onClearAnnotations,
+  onUndo,
+  onRedo,
+  canUndo,
+  canRedo,
   isSaving,
   canEdit,
 }: ToolbarProps) {
@@ -85,6 +97,36 @@ export function Toolbar({
             <Icon className="h-4 w-4" />
           </button>
         ))}
+      </div>
+
+      <div className="mx-2 h-6 w-px bg-slate-200 dark:bg-slate-700" />
+
+      {/* Undo/Redo */}
+      <div className="flex items-center gap-0.5">
+        <button
+          onClick={onUndo}
+          disabled={!canUndo || !canEdit}
+          title="Undo (Ctrl+Z)"
+          className={cn(
+            "rounded-md p-1.5 transition-colors",
+            "text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200",
+            "disabled:opacity-40 disabled:pointer-events-none"
+          )}
+        >
+          <Undo2 className="h-4 w-4" />
+        </button>
+        <button
+          onClick={onRedo}
+          disabled={!canRedo || !canEdit}
+          title="Redo (Ctrl+Shift+Z)"
+          className={cn(
+            "rounded-md p-1.5 transition-colors",
+            "text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200",
+            "disabled:opacity-40 disabled:pointer-events-none"
+          )}
+        >
+          <Redo2 className="h-4 w-4" />
+        </button>
       </div>
 
       <div className="mx-2 h-6 w-px bg-slate-200 dark:bg-slate-700" />

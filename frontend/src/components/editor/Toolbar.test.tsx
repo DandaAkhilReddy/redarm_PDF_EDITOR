@@ -17,19 +17,21 @@ const defaultProps = {
   onExport: vi.fn(),
   onOCR: vi.fn(),
   onClearAnnotations: vi.fn(),
+  onUndo: vi.fn(),
+  onRedo: vi.fn(),
+  canUndo: false,
+  canRedo: false,
   isSaving: false,
   canEdit: true,
 };
 
 // Helper: returns [prevPage, nextPage, zoomOut, zoomIn] buttons.
-// The toolbar renders (in order): 7 tool buttons, prevPage, nextPage,
-// zoomOut, zoomIn, clearAnnotations, OCR, Export, Save.
-// The unnamed ghost buttons (no title) appear in that fixed order.
+// The toolbar renders (in order): 8 tool buttons (with title), 2 undo/redo (with title),
+// then unnamed ghost buttons: prevPage, nextPage, zoomOut, zoomIn,
+// clearAnnotations (with title), ocr (with title), export, save.
 function getUnnamedButtons() {
   const all = screen.getAllByRole('button');
-  // 7 tool buttons have a title attr and are first; skip them.
-  // Remaining buttons: prevPage[0], nextPage[1], zoomOut[2], zoomIn[3],
-  // clearAnnotations[4], ocr[5], export[6], save[7]
+  // Tool buttons and undo/redo/clear/ocr have title attrs; ghost nav buttons do not.
   const unnamed = all.filter((btn) => !btn.hasAttribute('title'));
   return {
     prevPage: unnamed[0],
@@ -44,7 +46,7 @@ describe('Toolbar', () => {
     vi.clearAllMocks();
   });
 
-  it('renders all 7 tool buttons by title attribute', () => {
+  it('renders all 8 tool buttons by title attribute', () => {
     render(<Toolbar {...defaultProps} />);
 
     expect(screen.getByTitle('Select')).toBeInTheDocument();
@@ -54,6 +56,7 @@ describe('Toolbar', () => {
     expect(screen.getByTitle('Text')).toBeInTheDocument();
     expect(screen.getByTitle('Shape')).toBeInTheDocument();
     expect(screen.getByTitle('Redact')).toBeInTheDocument();
+    expect(screen.getByTitle('Eraser')).toBeInTheDocument();
   });
 
   it('shows page indicator "1 / 5"', () => {
@@ -155,6 +158,7 @@ describe('Toolbar', () => {
     expect(screen.getByTitle('Text')).toBeDisabled();
     expect(screen.getByTitle('Shape')).toBeDisabled();
     expect(screen.getByTitle('Redact')).toBeDisabled();
+    expect(screen.getByTitle('Eraser')).toBeDisabled();
   });
 
   it('shows "Export" text on the export button', () => {
@@ -169,5 +173,76 @@ describe('Toolbar', () => {
 
     expect(screen.getByText('Save')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /save/i })).toBeInTheDocument();
+  });
+
+  // --- Eraser tool ---
+
+  it('renders the Eraser tool button', () => {
+    render(<Toolbar {...defaultProps} />);
+    expect(screen.getByTitle('Eraser')).toBeInTheDocument();
+  });
+
+  it('calls onToolChange with "eraser" when Eraser is clicked', async () => {
+    const user = userEvent.setup();
+    render(<Toolbar {...defaultProps} />);
+
+    await user.click(screen.getByTitle('Eraser'));
+    expect(defaultProps.onToolChange).toHaveBeenCalledWith('eraser');
+  });
+
+  it('highlights the eraser button when activeTool="eraser"', () => {
+    render(<Toolbar {...defaultProps} activeTool="eraser" />);
+    const btn = screen.getByTitle('Eraser');
+    expect(btn.className).toContain('bg-white');
+  });
+
+  // --- Undo/Redo buttons ---
+
+  it('renders Undo and Redo buttons', () => {
+    render(<Toolbar {...defaultProps} />);
+    expect(screen.getByTitle('Undo (Ctrl+Z)')).toBeInTheDocument();
+    expect(screen.getByTitle('Redo (Ctrl+Shift+Z)')).toBeInTheDocument();
+  });
+
+  it('Undo button is disabled when canUndo=false', () => {
+    render(<Toolbar {...defaultProps} canUndo={false} />);
+    expect(screen.getByTitle('Undo (Ctrl+Z)')).toBeDisabled();
+  });
+
+  it('Undo button is enabled when canUndo=true', () => {
+    render(<Toolbar {...defaultProps} canUndo={true} />);
+    expect(screen.getByTitle('Undo (Ctrl+Z)')).not.toBeDisabled();
+  });
+
+  it('Redo button is disabled when canRedo=false', () => {
+    render(<Toolbar {...defaultProps} canRedo={false} />);
+    expect(screen.getByTitle('Redo (Ctrl+Shift+Z)')).toBeDisabled();
+  });
+
+  it('Redo button is enabled when canRedo=true', () => {
+    render(<Toolbar {...defaultProps} canRedo={true} />);
+    expect(screen.getByTitle('Redo (Ctrl+Shift+Z)')).not.toBeDisabled();
+  });
+
+  it('calls onUndo when Undo button is clicked', async () => {
+    const user = userEvent.setup();
+    render(<Toolbar {...defaultProps} canUndo={true} />);
+
+    await user.click(screen.getByTitle('Undo (Ctrl+Z)'));
+    expect(defaultProps.onUndo).toHaveBeenCalledTimes(1);
+  });
+
+  it('calls onRedo when Redo button is clicked', async () => {
+    const user = userEvent.setup();
+    render(<Toolbar {...defaultProps} canRedo={true} />);
+
+    await user.click(screen.getByTitle('Redo (Ctrl+Shift+Z)'));
+    expect(defaultProps.onRedo).toHaveBeenCalledTimes(1);
+  });
+
+  it('Undo and Redo buttons are disabled when canEdit=false', () => {
+    render(<Toolbar {...defaultProps} canEdit={false} canUndo={true} canRedo={true} />);
+    expect(screen.getByTitle('Undo (Ctrl+Z)')).toBeDisabled();
+    expect(screen.getByTitle('Redo (Ctrl+Shift+Z)')).toBeDisabled();
   });
 });

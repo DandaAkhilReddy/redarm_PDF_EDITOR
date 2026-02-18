@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect } from "react";
 import { useAuth } from "./hooks/useAuth";
 import { usePDF } from "./hooks/usePDF";
 import { useAnnotations } from "./hooks/useAnnotations";
+import { useUndoRedo } from "./hooks/useUndoRedo";
 import { useJobs } from "./hooks/useJobs";
 import { LoginPage } from "./components/auth/LoginPage";
 import { Header } from "./components/layout/Header";
@@ -29,6 +30,15 @@ export default function App() {
   // Annotations & jobs (only active when authenticated + doc loaded)
   const annotations = useAnnotations(auth.token, currentDocId, auth.email);
   const jobs = useJobs(auth.token, currentDocId);
+
+  // Undo/redo wraps annotation operations
+  const undoRedo = useUndoRedo(
+    annotations.addAnnotation,
+    annotations.removeAnnotation,
+    annotations.clearAnnotations,
+    annotations.ops,
+    annotations.setOps,
+  );
 
   // Theme (persisted to localStorage)
   const [theme, setTheme] = useState<Theme>(() => {
@@ -115,12 +125,34 @@ export default function App() {
     }
   }, [jobs, addToast]);
 
-  // Add annotation from toolbar
-  const handleToolAnnotation = useCallback(() => {
-    const tool = annotations.activeTool;
-    if (tool === "select" || tool === "pan") return;
-    annotations.addAnnotation(tool, pdf.currentPage);
-  }, [annotations, pdf.currentPage]);
+  // Annotation created from canvas drawing (via undo/redo wrapper)
+  const handleAnnotationCreated = useCallback(
+    (
+      opType: import("./types").AnnotationOperation["opType"],
+      page: number,
+      bounds: { x: number; y: number; w: number; h: number },
+      payload?: Record<string, unknown>,
+    ) => {
+      undoRedo.addAnnotation(opType, page, bounds, payload);
+    },
+    [undoRedo],
+  );
+
+  // Annotation erased from canvas (eraser tool)
+  const handleAnnotationErased = useCallback(
+    (opId: string) => {
+      undoRedo.removeAnnotation(opId);
+    },
+    [undoRedo],
+  );
+
+  // Annotation updated in-place (text editing)
+  const handleAnnotationUpdated = useCallback(
+    (opId: string, updates: { payload?: Record<string, unknown> }) => {
+      undoRedo.updateAnnotation(opId, updates);
+    },
+    [undoRedo],
+  );
 
   const canEdit = auth.isAuthenticated && currentDocId.length > 0;
 
@@ -160,9 +192,6 @@ export default function App() {
             activeTool={annotations.activeTool}
             onToolChange={(tool) => {
               annotations.setActiveTool(tool);
-              if (tool !== "select" && tool !== "pan" && canEdit) {
-                annotations.addAnnotation(tool, pdf.currentPage);
-              }
             }}
             currentPage={pdf.currentPage}
             totalPages={pdf.totalPages}
@@ -174,7 +203,11 @@ export default function App() {
             onSave={handleSave}
             onExport={handleExport}
             onOCR={handleOCR}
-            onClearAnnotations={annotations.clearAnnotations}
+            onClearAnnotations={undoRedo.clearAnnotations}
+            onUndo={undoRedo.undo}
+            onRedo={undoRedo.redo}
+            canUndo={undoRedo.canUndo}
+            canRedo={undoRedo.canRedo}
             isSaving={annotations.isSaving}
             canEdit={canEdit}
           />
@@ -184,6 +217,13 @@ export default function App() {
             canvasRef={pdf.canvasRef}
             isLoading={pdf.isLoading}
             hasDocument={currentDocId.length > 0}
+            annotations={annotations.ops}
+            currentPage={pdf.currentPage}
+            zoom={pdf.scale}
+            activeTool={annotations.activeTool}
+            onAnnotationCreated={handleAnnotationCreated}
+            onAnnotationErased={handleAnnotationErased}
+            onAnnotationUpdated={handleAnnotationUpdated}
           />
         }
         rightPanel={
@@ -191,7 +231,7 @@ export default function App() {
             <div className="flex-1 overflow-y-auto border-b border-slate-200 dark:border-slate-700">
               <AnnotationPanel
                 annotations={annotations.ops}
-                onRemove={annotations.removeAnnotation}
+                onRemove={undoRedo.removeAnnotation}
               />
             </div>
             <div className="flex-1 overflow-y-auto">

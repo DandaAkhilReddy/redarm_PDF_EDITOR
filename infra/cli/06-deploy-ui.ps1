@@ -27,4 +27,21 @@ az storage blob upload-batch `
   --connection-string $state.storageConnectionString `
   --overwrite true | Out-Null
 
+# Fix MIME type for .mjs files (Azure Blob Storage defaults them to text/plain)
+Write-Host "Fixing MIME types for .mjs files..."
+$mjsBlobs = az storage blob list `
+  --container-name '$web' `
+  --connection-string $state.storageConnectionString `
+  --query "[?ends_with(name, '.mjs')].name" `
+  -o tsv
+
+foreach ($blob in $mjsBlobs) {
+  az storage blob update `
+    --container-name '$web' `
+    --name $blob `
+    --connection-string $state.storageConnectionString `
+    --content-type "application/javascript" | Out-Null
+  Write-Host "  Fixed: $blob"
+}
+
 Write-Host "Frontend deployed to: $($state.staticWebUrl)"

@@ -8,14 +8,14 @@ export function useAnnotations(token: string, docId: string, author: string) {
   const [isSaving, setIsSaving] = useState(false);
 
   const addAnnotation = useCallback(
-    (opType: AnnotationOperation["opType"], page: number, bounds?: { x: number; y: number; w: number; h: number }) => {
+    (opType: AnnotationOperation["opType"], page: number, bounds?: { x: number; y: number; w: number; h: number }, payload?: Record<string, unknown>) => {
       const op: AnnotationOperation = {
         opId: crypto.randomUUID(),
         opType,
         page,
         bounds: bounds || { x: 50, y: 50, w: 120, h: 40 },
         author,
-        payload: { note: `${opType} annotation` },
+        payload: payload || { note: `${opType} annotation` },
         ts: new Date().toISOString(),
       };
       setOps((prev) => [...prev, op]);
@@ -50,6 +50,7 @@ export function useAnnotations(token: string, docId: string, author: string) {
 
   return {
     ops,
+    setOps,
     activeTool,
     setActiveTool,
     addAnnotation,
