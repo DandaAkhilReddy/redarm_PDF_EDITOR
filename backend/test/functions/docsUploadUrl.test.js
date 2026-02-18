@@ -10,15 +10,20 @@
 // Because of destructuring, patching the module's exports AFTER the function
 // module has been loaded has no effect on the already-captured local bindings.
 //
-// Instead we inject stub modules into require.cache under the exact resolved
-// paths BEFORE requiring docsUploadUrl.js. This way, when the function module
-// runs its own require() calls it receives our stubs directly.
+// module-mocks.js injects stub modules into require.cache under the exact
+// resolved paths. It MUST be required BEFORE any src/ handler require so that
+// when the handler runs its own require() calls it receives our stubs.
 
+// 1. Test environment (env vars)
 require('../_helpers/setup');
 
 const { describe, it, before, beforeEach } = require('node:test');
 const assert = require('node:assert/strict');
-const path   = require('node:path');
+
+// 2. module-mocks — BEFORE any src/ require
+const mm = require('../_helpers/module-mocks');
+
+// 3. Other helpers (mocks.js)
 const {
   createMockRequest,
   createBadJsonRequest,
@@ -26,30 +31,9 @@ const {
 } = require('../_helpers/mocks');
 
 // ---------------------------------------------------------------------------
-// Resolved paths for the real source modules
-// ---------------------------------------------------------------------------
-const storageModulePath = require.resolve('../../src/lib/storage');
-const tablesModulePath  = require.resolve('../../src/lib/tables');
-
-// ---------------------------------------------------------------------------
-// Mutable stub state — each test replaces these before calling the handler.
-// ---------------------------------------------------------------------------
-const stubs = {
-  buildBlobSasUrl: null,
-  upsertDocument: null,
-};
-
-// ---------------------------------------------------------------------------
 // UUID v4 regex
 // ---------------------------------------------------------------------------
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
-// ---------------------------------------------------------------------------
-// Helper: ISO timestamp for isoNow stub
-// ---------------------------------------------------------------------------
-function fakeIsoNow() {
-  return new Date().toISOString();
-}
 
 // ---------------------------------------------------------------------------
 // Helper: build a standard valid request body
@@ -73,35 +57,8 @@ function stubSas(permissions, expiresInMinutes) {
   };
 }
 
-// ---------------------------------------------------------------------------
-// Inject stub modules into require.cache BEFORE docsUploadUrl is loaded.
-// The stubs proxy through to the `stubs` object so that each test can swap
-// behaviour without needing another cache-bust cycle.
-// ---------------------------------------------------------------------------
-require.cache[storageModulePath] = {
-  id: storageModulePath,
-  filename: storageModulePath,
-  loaded: true,
-  exports: {
-    buildBlobSasUrl: (...args) => stubs.buildBlobSasUrl(...args),
-  },
-};
-
-require.cache[tablesModulePath] = {
-  id: tablesModulePath,
-  filename: tablesModulePath,
-  loaded: true,
-  exports: {
-    upsertDocument: (...args) => stubs.upsertDocument(...args),
-    isoNow: fakeIsoNow,
-    // Other exports not needed by this handler are left undefined intentionally.
-  },
-};
-
-// ---------------------------------------------------------------------------
-// Capture the handler by temporarily wrapping app.http.
-// docsUploadUrl.js will now resolve storage / tables to our stubs.
-// ---------------------------------------------------------------------------
+// 4. Capture the handler by temporarily wrapping app.http.
+//    docsUploadUrl.js will now resolve storage / tables to our stubs.
 let capturedHandler;
 const { app } = require('@azure/functions');
 const origHttp = app.http;
@@ -110,6 +67,8 @@ app.http = (name, opts) => {
     capturedHandler = opts.handler;
   }
 };
+
+// 5. Load the handler module — AFTER module-mocks has patched require.cache
 require('../../src/functions/docsUploadUrl');
 app.http = origHttp;
 
@@ -123,11 +82,16 @@ describe('docsUploadUrl handler — POST /api/docs/upload-url', () => {
   });
 
   beforeEach(() => {
-    // Default no-op / sensible stubs reset before every test.
-    stubs.buildBlobSasUrl = (containerName, blobName, permissions, expiresInMinutes) =>
-      stubSas(permissions, expiresInMinutes);
+    // Reset all mocks to clean defaults, then configure test-specific defaults.
+    mm.resetAll();
 
-    stubs.upsertDocument = async (_entity) => { /* no-op */ };
+    // Default SAS stub: returns a deterministic URL based on permissions/TTL.
+    mm.setBuildBlobSasUrl((containerName, blobName, permissions, expiresInMinutes) =>
+      stubSas(permissions, expiresInMinutes)
+    );
+
+    // Default upsertDocument: no-op.
+    mm.setUpsertDocument(async (_entity) => {});
   });
 
   // -------------------------------------------------------------------------
@@ -306,10 +270,8 @@ describe('docsUploadUrl handler — POST /api/docs/upload-url', () => {
   // 10. upsertDocument is called with the correct metadata structure
   // -------------------------------------------------------------------------
   it('calls upsertDocument with correct metadata', async () => {
-    const calledWith = [];
-    stubs.upsertDocument = async (entity) => {
-      calledWith.push(entity);
-    };
+    const upsertSpy = mm.spy(async () => {});
+    mm.setUpsertDocument(upsertSpy);
 
     const authEmail = 'uploader@redarm.test';
     const req = createMockRequest({
@@ -319,9 +281,9 @@ describe('docsUploadUrl handler — POST /api/docs/upload-url', () => {
     const res = await capturedHandler(req);
 
     assert.equal(res.status, 200);
-    assert.equal(calledWith.length, 1, 'upsertDocument should be called exactly once');
+    assert.equal(upsertSpy.calls.length, 1, 'upsertDocument should be called exactly once');
 
-    const entity = calledWith[0];
+    const entity = upsertSpy.calls[0][0];
 
     // docId must match what was returned in the response
     assert.equal(entity.docId, res.jsonBody.docId, 'upserted docId should match response docId');
@@ -402,10 +364,10 @@ describe('docsUploadUrl handler — POST /api/docs/upload-url', () => {
   // -------------------------------------------------------------------------
   it('generates distinct upload and read SAS URLs with correct permissions and TTLs', async () => {
     const sasCalls = [];
-    stubs.buildBlobSasUrl = (containerName, blobName, permissions, expiresInMinutes) => {
+    mm.setBuildBlobSasUrl((containerName, blobName, permissions, expiresInMinutes) => {
       sasCalls.push({ containerName, blobName, permissions, expiresInMinutes });
       return stubSas(permissions, expiresInMinutes);
-    };
+    });
 
     const req = createMockRequest({
       body: validBody(),
