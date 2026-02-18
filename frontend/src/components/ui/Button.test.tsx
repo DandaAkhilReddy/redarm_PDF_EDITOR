@@ -65,7 +65,7 @@ describe('Button', () => {
     const btn = screen.getByRole('button', { name: /saving/i });
     const svg = btn.querySelector('svg');
     expect(svg).toBeInTheDocument();
-    expect(svg?.className).toMatch(/animate-spin/);
+    expect(svg?.getAttribute('class')).toMatch(/animate-spin/);
   });
 
   it('renders a custom icon when provided and isLoading is false', () => {
