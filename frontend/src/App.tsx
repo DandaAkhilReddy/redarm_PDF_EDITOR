@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { useAuth } from "./hooks/useAuth";
 import { usePDF } from "./hooks/usePDF";
 import { useAnnotations } from "./hooks/useAnnotations";
@@ -154,6 +154,18 @@ export default function App() {
     [undoRedo],
   );
 
+  // Click feedback toast (throttled to prevent spam)
+  const lastFeedbackRef = useRef(0);
+  const handleClickFeedback = useCallback(
+    (message: string) => {
+      const now = Date.now();
+      if (now - lastFeedbackRef.current < 3000) return;
+      lastFeedbackRef.current = now;
+      addToast("info", message);
+    },
+    [addToast],
+  );
+
   const canEdit = auth.isAuthenticated && currentDocId.length > 0;
 
   // --- Render ---
@@ -224,6 +236,7 @@ export default function App() {
             onAnnotationCreated={handleAnnotationCreated}
             onAnnotationErased={handleAnnotationErased}
             onAnnotationUpdated={handleAnnotationUpdated}
+            onClickFeedback={handleClickFeedback}
           />
         }
         rightPanel={

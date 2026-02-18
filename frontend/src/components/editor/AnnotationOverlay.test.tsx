@@ -832,6 +832,7 @@ describe("AnnotationOverlay", () => {
         expect.any(Function),
         expect.any(Array),
         undefined,
+        undefined,
       );
     });
 
@@ -845,6 +846,7 @@ describe("AnnotationOverlay", () => {
         expect.any(Number),
         expect.any(Function),
         expect.any(Array),
+        undefined,
         undefined,
       );
     });
@@ -860,6 +862,7 @@ describe("AnnotationOverlay", () => {
         expect.any(Function),
         expect.any(Array),
         undefined,
+        undefined,
       );
     });
 
@@ -874,6 +877,7 @@ describe("AnnotationOverlay", () => {
         expect.any(Number),
         onCreate,
         expect.any(Array),
+        undefined,
         undefined,
       );
     });
@@ -893,6 +897,7 @@ describe("AnnotationOverlay", () => {
         expect.any(Function),
         ops,
         undefined,
+        undefined,
       );
     });
 
@@ -910,6 +915,7 @@ describe("AnnotationOverlay", () => {
         expect.any(Function),
         expect.any(Array),
         onErased,
+        undefined,
       );
     });
 
@@ -931,7 +937,7 @@ describe("AnnotationOverlay", () => {
         />,
       );
 
-      expect(useDrawing).toHaveBeenCalledWith("shape", 1.5, 7, onCreate, ops, onErased);
+      expect(useDrawing).toHaveBeenCalledWith("shape", 1.5, 7, onCreate, ops, onErased, undefined);
     });
   });
 

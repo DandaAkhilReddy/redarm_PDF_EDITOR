@@ -36,6 +36,7 @@ const defaultProps = {
   onAnnotationCreated: vi.fn(),
   onAnnotationErased: vi.fn(),
   onAnnotationUpdated: vi.fn(),
+  onClickFeedback: vi.fn(),
 };
 
 function getSvg(container: HTMLElement): SVGSVGElement {
@@ -1059,5 +1060,167 @@ describe('Ink tool bypasses MIN_DRAG', () => {
       expect.any(Object),
       expect.objectContaining({ points: expect.any(Array) }),
     );
+  });
+});
+
+// =========================================================================
+// Click ripple visual feedback
+// =========================================================================
+
+describe('Click ripple visual feedback', () => {
+  it('57. Renders a <circle> element in SVG after pointerDown with highlight tool', () => {
+    const props = { ...defaultProps, activeTool: 'highlight' as const };
+    const { container } = render(<AnnotationOverlay {...props} />);
+    const svg = getSvg(container);
+
+    pointerDown(svg, 100, 100);
+
+    const circles = svg.querySelectorAll('circle');
+    expect(circles.length).toBeGreaterThan(0);
+  });
+
+  it('58. Does NOT render a ripple for pan tool', () => {
+    const props = { ...defaultProps, activeTool: 'pan' as const };
+    const { container } = render(<AnnotationOverlay {...props} />);
+    const svg = getSvg(container);
+
+    pointerDown(svg, 100, 100);
+
+    const circles = svg.querySelectorAll('circle');
+    expect(circles.length).toBe(0);
+  });
+
+  it('59. Renders a ripple for text tool click', () => {
+    const props = { ...defaultProps, activeTool: 'text' as const };
+    vi.mocked(hitTestAnnotation).mockReturnValueOnce(null);
+
+    const { container } = render(<AnnotationOverlay {...props} />);
+    const svg = getSvg(container);
+
+    pointerDown(svg, 200, 200);
+
+    const circles = svg.querySelectorAll('circle');
+    expect(circles.length).toBeGreaterThan(0);
+  });
+
+  it('60. Renders a ripple for select tool click', () => {
+    const props = { ...defaultProps, activeTool: 'select' as const };
+    const { container } = render(<AnnotationOverlay {...props} />);
+    const svg = getSvg(container);
+
+    pointerDown(svg, 150, 150);
+
+    const circles = svg.querySelectorAll('circle');
+    expect(circles.length).toBeGreaterThan(0);
+  });
+});
+
+// =========================================================================
+// onClickFeedback — select on empty
+// =========================================================================
+
+describe('onClickFeedback — select on empty', () => {
+  it('61. Calls onClickFeedback when clicking empty space with select tool', () => {
+    const onFeedback = vi.fn();
+    vi.mocked(hitTestAnnotation).mockReturnValueOnce(null);
+    const props = {
+      ...defaultProps,
+      activeTool: 'select' as const,
+      onClickFeedback: onFeedback,
+    };
+    const { container } = render(<AnnotationOverlay {...props} />);
+    const svg = getSvg(container);
+
+    pointerDown(svg, 200, 200);
+
+    expect(onFeedback).toHaveBeenCalledWith(expect.stringContaining('tool'));
+  });
+
+  it('62. Does NOT call onClickFeedback when clicking on a text annotation', () => {
+    const textOp = makeOp({ opId: 'text-1', opType: 'text', payload: { text: 'Hello' } });
+    vi.mocked(hitTestAnnotation).mockReturnValueOnce('text-1');
+    const onFeedback = vi.fn();
+    const props = {
+      ...defaultProps,
+      activeTool: 'select' as const,
+      annotations: [textOp],
+      onClickFeedback: onFeedback,
+    };
+    const { container } = render(<AnnotationOverlay {...props} />);
+    const svg = getSvg(container);
+
+    pointerDown(svg, 50, 30);
+
+    expect(onFeedback).not.toHaveBeenCalled();
+  });
+});
+
+// =========================================================================
+// onClickFeedback — drag-required tools
+// =========================================================================
+
+describe('onClickFeedback — drag-required tools', () => {
+  it('63. Calls onClickFeedback when highlight click is below MIN_DRAG', () => {
+    const onFeedback = vi.fn();
+    const props = {
+      ...defaultProps,
+      activeTool: 'highlight' as const,
+      onClickFeedback: onFeedback,
+    };
+    const { container } = render(<AnnotationOverlay {...props} />);
+    const svg = getSvg(container);
+
+    // Tiny drag - below MIN_DRAG
+    drag(svg, { x: 100, y: 100 }, { x: 102, y: 103 });
+
+    expect(onFeedback).toHaveBeenCalledWith(expect.stringContaining('drag'));
+    expect(props.onAnnotationCreated).not.toHaveBeenCalled();
+  });
+
+  it('64. Does NOT call onClickFeedback when drag exceeds MIN_DRAG', () => {
+    const onFeedback = vi.fn();
+    const props = {
+      ...defaultProps,
+      activeTool: 'highlight' as const,
+      onClickFeedback: onFeedback,
+    };
+    const { container } = render(<AnnotationOverlay {...props} />);
+    const svg = getSvg(container);
+
+    drag(svg, { x: 100, y: 100 }, { x: 200, y: 200 });
+
+    expect(onFeedback).not.toHaveBeenCalled();
+    expect(props.onAnnotationCreated).toHaveBeenCalledTimes(1);
+  });
+
+  it('65. Calls onClickFeedback for shape tool sub-threshold click', () => {
+    const onFeedback = vi.fn();
+    const props = {
+      ...defaultProps,
+      activeTool: 'shape' as const,
+      onClickFeedback: onFeedback,
+    };
+    const { container } = render(<AnnotationOverlay {...props} />);
+    const svg = getSvg(container);
+
+    drag(svg, { x: 50, y: 50 }, { x: 52, y: 53 });
+
+    expect(onFeedback).toHaveBeenCalledWith(expect.stringContaining('drag'));
+  });
+
+  it('66. Does NOT call onClickFeedback for ink tool (ink has no MIN_DRAG)', () => {
+    const onFeedback = vi.fn();
+    const props = {
+      ...defaultProps,
+      activeTool: 'ink' as const,
+      onClickFeedback: onFeedback,
+    };
+    const { container } = render(<AnnotationOverlay {...props} />);
+    const svg = getSvg(container);
+
+    drag(svg, { x: 100, y: 100 }, { x: 101, y: 101 });
+
+    expect(onFeedback).not.toHaveBeenCalled();
+    expect(props.onAnnotationCreated).toHaveBeenCalledTimes(1);
   });
 });

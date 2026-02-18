@@ -17,6 +17,7 @@ interface AnnotationOverlayProps {
   ) => void;
   onAnnotationErased?: (opId: string) => void;
   onAnnotationUpdated?: (opId: string, updates: { payload?: Record<string, unknown> }) => void;
+  onClickFeedback?: (message: string) => void;
 }
 
 function getPreviewStyle(tool: AnnotationTool) {
@@ -112,6 +113,7 @@ export function AnnotationOverlay({
   onAnnotationCreated,
   onAnnotationErased,
   onAnnotationUpdated,
+  onClickFeedback,
 }: AnnotationOverlayProps) {
   const {
     svgRef,
@@ -122,11 +124,12 @@ export function AnnotationOverlay({
     hoveredOpId,
     editingOpId,
     setEditingOpId,
+    clickRipple,
     handlers,
     submitText,
     cancelText,
     cursorClass,
-  } = useDrawing(activeTool, zoom, currentPage, onAnnotationCreated, annotations, onAnnotationErased);
+  } = useDrawing(activeTool, zoom, currentPage, onAnnotationCreated, annotations, onAnnotationErased, onClickFeedback);
 
   const pageOps = annotations.filter((op) => op.page === currentPage);
   const editingOp = editingOpId ? annotations.find((o) => o.opId === editingOpId) : null;
@@ -169,6 +172,23 @@ export function AnnotationOverlay({
             strokeLinecap="round"
             strokeLinejoin="round"
           />
+        )}
+
+        {/* Click ripple — animated circle proving the click registered */}
+        {clickRipple && (
+          <circle
+            key={clickRipple.id}
+            cx={clickRipple.x * zoom}
+            cy={clickRipple.y * zoom}
+            r={16}
+            fill="none"
+            stroke="rgba(59, 130, 246, 0.6)"
+            strokeWidth={2}
+          >
+            <animate attributeName="r" from="4" to="24" dur="0.4s" fill="freeze" />
+            <animate attributeName="opacity" from="0.8" to="0" dur="0.4s" fill="freeze" />
+            <animate attributeName="stroke-width" from="2" to="0.5" dur="0.4s" fill="freeze" />
+          </circle>
         )}
       </svg>
 

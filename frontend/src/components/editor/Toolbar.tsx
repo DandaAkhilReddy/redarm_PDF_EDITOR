@@ -44,15 +44,15 @@ interface ToolbarProps {
   canEdit: boolean;
 }
 
-const tools: { id: AnnotationTool; icon: typeof MousePointer2; label: string }[] = [
-  { id: "select", icon: MousePointer2, label: "Select" },
-  { id: "pan", icon: Hand, label: "Pan" },
-  { id: "highlight", icon: Highlighter, label: "Highlight" },
-  { id: "ink", icon: Pen, label: "Ink" },
-  { id: "text", icon: Type, label: "Text" },
-  { id: "shape", icon: Square, label: "Shape" },
-  { id: "redaction", icon: EyeOff, label: "Redact" },
-  { id: "eraser", icon: Eraser, label: "Eraser" },
+const tools: { id: AnnotationTool; icon: typeof MousePointer2; label: string; hint: string }[] = [
+  { id: "select", icon: MousePointer2, label: "Select", hint: "Select — click text to edit" },
+  { id: "pan", icon: Hand, label: "Pan", hint: "Pan — scroll the document" },
+  { id: "highlight", icon: Highlighter, label: "Highlight", hint: "Highlight — click & drag a region" },
+  { id: "ink", icon: Pen, label: "Ink", hint: "Ink — freehand draw" },
+  { id: "text", icon: Type, label: "Text", hint: "Text — click to place text" },
+  { id: "shape", icon: Square, label: "Shape", hint: "Shape — click & drag a rectangle" },
+  { id: "redaction", icon: EyeOff, label: "Redact", hint: "Redact — click & drag to cover" },
+  { id: "eraser", icon: Eraser, label: "Eraser", hint: "Eraser — click an annotation to remove" },
 ];
 
 export function Toolbar({
@@ -80,12 +80,12 @@ export function Toolbar({
     <div className="flex items-center gap-1 border-b border-slate-200 bg-white px-3 py-1.5 dark:border-slate-700 dark:bg-slate-900">
       {/* Tools */}
       <div className="flex items-center gap-0.5 rounded-lg bg-slate-100 p-0.5 dark:bg-slate-800">
-        {tools.map(({ id, icon: Icon, label }) => (
+        {tools.map(({ id, icon: Icon, hint }) => (
           <button
             key={id}
             onClick={() => onToolChange(id)}
             disabled={!canEdit && id !== "select" && id !== "pan"}
-            title={label}
+            title={hint}
             className={cn(
               "rounded-md p-1.5 transition-colors",
               activeTool === id

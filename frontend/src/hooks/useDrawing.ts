@@ -5,6 +5,16 @@ import type { AnnotationOperation, AnnotationTool } from "../types";
 type Point = { x: number; y: number };
 type Bounds = { x: number; y: number; w: number; h: number };
 
+/* ── Dev-only diagnostic logging (tree-shaken in production) ── */
+const DEBUG =
+  typeof import.meta !== "undefined" &&
+  import.meta.env?.DEV;
+
+function debugLog(action: string, data?: Record<string, unknown>) {
+  if (!DEBUG) return;
+  console.debug(`[useDrawing] ${action}`, data ?? "");
+}
+
 export function screenToPdf(
   clientX: number,
   clientY: number,
@@ -43,6 +53,7 @@ export function useDrawing(
   ) => void,
   annotations: AnnotationOperation[] = [],
   onAnnotationErased?: (opId: string) => void,
+  onClickFeedback?: (message: string) => void,
 ) {
   const svgRef = useRef<SVGSVGElement | null>(null);
   const [isDrawing, setIsDrawing] = useState(false);
@@ -52,6 +63,10 @@ export function useDrawing(
   const [textInputPos, setTextInputPos] = useState<Point | null>(null);
   const [hoveredOpId, setHoveredOpId] = useState<string | null>(null);
   const [editingOpId, setEditingOpId] = useState<string | null>(null);
+
+  // Click ripple state — visual proof that every click registers
+  const [clickRipple, setClickRipple] = useState<{ x: number; y: number; id: number } | null>(null);
+  const rippleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const previewRect: Bounds | null =
     drawStart && drawCurrent
@@ -70,14 +85,24 @@ export function useDrawing(
       if (!svg) return;
 
       const pt = screenToPdf(e.clientX, e.clientY, svg, zoom);
+      debugLog("pointerDown", { activeTool, pt, page: currentPage });
+
+      // Click ripple — fires for every tool except pan
+      if (rippleTimerRef.current) clearTimeout(rippleTimerRef.current);
+      setClickRipple({ x: pt.x, y: pt.y, id: Date.now() });
+      rippleTimerRef.current = setTimeout(() => setClickRipple(null), 500);
 
       // Select: allow click-to-edit existing text annotations
       if (activeTool === "select") {
         const hitId = hitTestAnnotation(pt, annotations, currentPage);
         const hitOp = hitId ? annotations.find((o) => o.opId === hitId && o.opType === "text") : null;
+        debugLog("select hitTest", { hitId, hitOpType: hitOp?.opType ?? null });
         if (hitOp) {
           setEditingOpId(hitOp.opId);
           setTextInputPos({ x: hitOp.bounds.x, y: hitOp.bounds.y });
+        } else if (!hitId) {
+          // Clicked on empty space — guide the user
+          onClickFeedback?.("Select a drawing tool to annotate, or use Text to add text.");
         }
         return;
       }
@@ -85,6 +110,7 @@ export function useDrawing(
       // Eraser: hit-test and remove
       if (activeTool === "eraser") {
         const hitId = hitTestAnnotation(pt, annotations, currentPage);
+        debugLog("eraser hitTest", { hitId });
         if (hitId && onAnnotationErased) {
           onAnnotationErased(hitId);
         }
@@ -95,6 +121,7 @@ export function useDrawing(
       if (activeTool === "text") {
         const hitId = hitTestAnnotation(pt, annotations, currentPage);
         const hitOp = hitId ? annotations.find((o) => o.opId === hitId && o.opType === "text") : null;
+        debugLog("text hitTest", { hitId, isNew: !hitOp });
         if (hitOp) {
           setEditingOpId(hitOp.opId);
           setTextInputPos({ x: hitOp.bounds.x, y: hitOp.bounds.y });
@@ -113,7 +140,7 @@ export function useDrawing(
       }
       svg.setPointerCapture(e.pointerId);
     },
-    [activeTool, zoom, annotations, currentPage, onAnnotationErased],
+    [activeTool, zoom, annotations, currentPage, onAnnotationErased, onClickFeedback],
   );
 
   const onPointerMove = useCallback(
@@ -168,8 +195,12 @@ export function useDrawing(
           w: Math.abs(pt.x - drawStart.x),
           h: Math.abs(pt.y - drawStart.y),
         };
+        debugLog("pointerUp", { activeTool, bounds, meetsMinDrag: bounds.w >= MIN_DRAG || bounds.h >= MIN_DRAG });
         if (bounds.w >= MIN_DRAG || bounds.h >= MIN_DRAG) {
           onAnnotationCreated(opType, currentPage, bounds);
+        } else {
+          // Click without drag — guide the user
+          onClickFeedback?.("Click and drag to draw. Hold and pull to create a region.");
         }
       }
 
@@ -178,7 +209,7 @@ export function useDrawing(
       setDrawCurrent(null);
       setInkPoints([]);
     },
-    [isDrawing, drawStart, inkPoints, activeTool, zoom, currentPage, onAnnotationCreated],
+    [isDrawing, drawStart, inkPoints, activeTool, zoom, currentPage, onAnnotationCreated, onClickFeedback],
   );
 
   const submitText = useCallback(
@@ -221,6 +252,7 @@ export function useDrawing(
     hoveredOpId,
     editingOpId,
     setEditingOpId,
+    clickRipple,
     handlers: { onPointerDown, onPointerMove, onPointerUp },
     submitText,
     cancelText,

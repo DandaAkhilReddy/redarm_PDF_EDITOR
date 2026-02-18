@@ -19,6 +19,7 @@ interface PDFViewerProps {
   ) => void;
   onAnnotationErased?: (opId: string) => void;
   onAnnotationUpdated?: (opId: string, updates: { payload?: Record<string, unknown> }) => void;
+  onClickFeedback?: (message: string) => void;
 }
 
 export function PDFViewer({
@@ -32,6 +33,7 @@ export function PDFViewer({
   onAnnotationCreated,
   onAnnotationErased,
   onAnnotationUpdated,
+  onClickFeedback,
 }: PDFViewerProps) {
   if (!hasDocument) {
     return (
@@ -69,6 +71,7 @@ export function PDFViewer({
           onAnnotationCreated={onAnnotationCreated}
           onAnnotationErased={onAnnotationErased}
           onAnnotationUpdated={onAnnotationUpdated}
+          onClickFeedback={onClickFeedback}
         />
       </div>
     </div>

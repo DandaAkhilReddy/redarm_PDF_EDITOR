@@ -49,14 +49,14 @@ describe('Toolbar', () => {
   it('renders all 8 tool buttons by title attribute', () => {
     render(<Toolbar {...defaultProps} />);
 
-    expect(screen.getByTitle('Select')).toBeInTheDocument();
-    expect(screen.getByTitle('Pan')).toBeInTheDocument();
-    expect(screen.getByTitle('Highlight')).toBeInTheDocument();
-    expect(screen.getByTitle('Ink')).toBeInTheDocument();
-    expect(screen.getByTitle('Text')).toBeInTheDocument();
-    expect(screen.getByTitle('Shape')).toBeInTheDocument();
-    expect(screen.getByTitle('Redact')).toBeInTheDocument();
-    expect(screen.getByTitle('Eraser')).toBeInTheDocument();
+    expect(screen.getByTitle('Select \u2014 click text to edit')).toBeInTheDocument();
+    expect(screen.getByTitle('Pan \u2014 scroll the document')).toBeInTheDocument();
+    expect(screen.getByTitle('Highlight \u2014 click & drag a region')).toBeInTheDocument();
+    expect(screen.getByTitle('Ink \u2014 freehand draw')).toBeInTheDocument();
+    expect(screen.getByTitle('Text \u2014 click to place text')).toBeInTheDocument();
+    expect(screen.getByTitle('Shape \u2014 click & drag a rectangle')).toBeInTheDocument();
+    expect(screen.getByTitle('Redact \u2014 click & drag to cover')).toBeInTheDocument();
+    expect(screen.getByTitle('Eraser \u2014 click an annotation to remove')).toBeInTheDocument();
   });
 
   it('shows page indicator "1 / 5"', () => {
@@ -149,16 +149,16 @@ describe('Toolbar', () => {
     render(<Toolbar {...defaultProps} canEdit={false} />);
 
     // select and pan must remain enabled
-    expect(screen.getByTitle('Select')).not.toBeDisabled();
-    expect(screen.getByTitle('Pan')).not.toBeDisabled();
+    expect(screen.getByTitle('Select \u2014 click text to edit')).not.toBeDisabled();
+    expect(screen.getByTitle('Pan \u2014 scroll the document')).not.toBeDisabled();
 
     // every other annotation tool must be disabled
-    expect(screen.getByTitle('Highlight')).toBeDisabled();
-    expect(screen.getByTitle('Ink')).toBeDisabled();
-    expect(screen.getByTitle('Text')).toBeDisabled();
-    expect(screen.getByTitle('Shape')).toBeDisabled();
-    expect(screen.getByTitle('Redact')).toBeDisabled();
-    expect(screen.getByTitle('Eraser')).toBeDisabled();
+    expect(screen.getByTitle('Highlight \u2014 click & drag a region')).toBeDisabled();
+    expect(screen.getByTitle('Ink \u2014 freehand draw')).toBeDisabled();
+    expect(screen.getByTitle('Text \u2014 click to place text')).toBeDisabled();
+    expect(screen.getByTitle('Shape \u2014 click & drag a rectangle')).toBeDisabled();
+    expect(screen.getByTitle('Redact \u2014 click & drag to cover')).toBeDisabled();
+    expect(screen.getByTitle('Eraser \u2014 click an annotation to remove')).toBeDisabled();
   });
 
   it('shows "Export" text on the export button', () => {
@@ -179,20 +179,20 @@ describe('Toolbar', () => {
 
   it('renders the Eraser tool button', () => {
     render(<Toolbar {...defaultProps} />);
-    expect(screen.getByTitle('Eraser')).toBeInTheDocument();
+    expect(screen.getByTitle('Eraser \u2014 click an annotation to remove')).toBeInTheDocument();
   });
 
   it('calls onToolChange with "eraser" when Eraser is clicked', async () => {
     const user = userEvent.setup();
     render(<Toolbar {...defaultProps} />);
 
-    await user.click(screen.getByTitle('Eraser'));
+    await user.click(screen.getByTitle('Eraser \u2014 click an annotation to remove'));
     expect(defaultProps.onToolChange).toHaveBeenCalledWith('eraser');
   });
 
   it('highlights the eraser button when activeTool="eraser"', () => {
     render(<Toolbar {...defaultProps} activeTool="eraser" />);
-    const btn = screen.getByTitle('Eraser');
+    const btn = screen.getByTitle('Eraser \u2014 click an annotation to remove');
     expect(btn.className).toContain('bg-white');
   });
 

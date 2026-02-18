@@ -188,8 +188,8 @@ describe('useDrawing', () => {
     onAnnotationErased: vi.fn(),
   };
 
-  function renderDrawingHook(overrides: Partial<typeof defaultProps> = {}) {
-    const props = { ...defaultProps, onAnnotationCreated: makeOnCreated(), onAnnotationErased: vi.fn(), ...overrides };
+  function renderDrawingHook(overrides: Partial<typeof defaultProps & { onClickFeedback: ReturnType<typeof vi.fn> }> = {}) {
+    const props = { ...defaultProps, onAnnotationCreated: makeOnCreated(), onAnnotationErased: vi.fn(), onClickFeedback: vi.fn(), ...overrides };
     return {
       ...renderHook(() =>
         useDrawing(
@@ -199,6 +199,7 @@ describe('useDrawing', () => {
           props.onAnnotationCreated,
           props.annotations,
           props.onAnnotationErased,
+          props.onClickFeedback,
         ),
       ),
       props,
@@ -515,6 +516,32 @@ describe('useDrawing', () => {
 
       rerender();
       expect(result.current.cursorClass).toBe('cursor-crosshair');
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Click ripple state
+  // -------------------------------------------------------------------------
+  describe('clickRipple', () => {
+    it('clickRipple is null initially', () => {
+      const { result } = renderDrawingHook();
+      expect(result.current.clickRipple).toBeNull();
+    });
+
+    it('clickRipple is returned from hook', () => {
+      const { result } = renderDrawingHook();
+      expect(result.current).toHaveProperty('clickRipple');
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Return shape includes new properties
+  // -------------------------------------------------------------------------
+  describe('return shape includes new properties', () => {
+    it('returns clickRipple in the expected properties', () => {
+      const { result } = renderDrawingHook();
+      const keys = Object.keys(result.current);
+      expect(keys).toContain('clickRipple');
     });
   });
 });
