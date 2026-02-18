@@ -1,19 +1,31 @@
 // backend/test/functions/exportWorker.test.js
 // Tests for the export-worker queue-triggered Azure Function.
+//
+// CRITICAL require order:
+//  1. setup     — sets env vars before any source module loads
+//  2. mm        — injects mock tables/storage into require.cache BEFORE handler loads
+//  3. everything else (node:test, helpers, …)
+//  4. handler capture — intercept app.storageQueue, then require the handler
 
+// 1. Env-var setup (must be first)
 require('../_helpers/setup');
-const { describe, it, mock, beforeEach } = require('node:test');
+
+// 2. Module-level mocks injected into require.cache BEFORE the handler module
+//    is loaded. exportWorker.js destructures { getDocument, updateJob, … }
+//    and { downloadToBuffer, uploadBuffer, buildBlobSasUrl } at require-time,
+//    so those bindings point into the mock objects placed here.
+const mm = require('../_helpers/module-mocks');
+
+// 3. Other test infrastructure
+const { describe, it, beforeEach } = require('node:test');
 const assert = require('node:assert/strict');
 const { createMockContext } = require('../_helpers/mocks');
 
-// ---------------------------------------------------------------------------
-// Capture the handler registered by exportWorker.js before it is loaded.
-// We intercept app.storageQueue so the module never tries to actually register
-// against a live Azure Functions runtime.
-// ---------------------------------------------------------------------------
+// 4. Handler capture — intercept app.storageQueue so the module never tries
+//    to register against a live Azure Functions runtime, then load the module.
 let capturedHandler;
 const { app } = require('@azure/functions');
-const origQueue = app.storageQueue;
+const origQueue = app.storageQueue.bind(app);
 app.storageQueue = (name, opts) => {
   if (name === 'export-worker') {
     capturedHandler = opts.handler;
@@ -21,12 +33,6 @@ app.storageQueue = (name, opts) => {
 };
 require('../../src/functions/exportWorker');
 app.storageQueue = origQueue;
-
-// ---------------------------------------------------------------------------
-// Module-level mocks for all external dependencies used by exportWorker.js
-// ---------------------------------------------------------------------------
-const tables = require('../../src/lib/tables');
-const storage = require('../../src/lib/storage');
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -58,10 +64,13 @@ async function runHandler(message, context) {
 }
 
 // ---------------------------------------------------------------------------
-// Reset all mocks before each test so state does not bleed between tests.
+// Reset all mock implementations before each test so state does not bleed.
+// We use mm.resetAll() instead of mock.restoreAll() because the handler holds
+// direct references to the wrapper functions in the mock objects — not to the
+// real module methods — so node:test's mock.method patching has no effect.
 // ---------------------------------------------------------------------------
 beforeEach(() => {
-  mock.restoreAll();
+  mm.resetAll();
 });
 
 // ---------------------------------------------------------------------------
@@ -77,12 +86,13 @@ describe('exportWorker — handler registration', () => {
 
 describe('exportWorker — early-exit for invalid payloads', () => {
   it('returns early and does not call updateJob when jobId is missing', async () => {
-    const updateJobMock = mock.method(tables, 'updateJob', async () => {});
+    const calls = [];
+    mm.setUpdateJob(async (jobId, patch) => { calls.push(patch); });
     const ctx = createMockContext();
 
     await runHandler(makeTask({ jobId: '' }), ctx);
 
-    assert.equal(updateJobMock.mock.callCount(), 0,
+    assert.equal(calls.length, 0,
       'updateJob must not be called for messages without a jobId');
 
     const errorLogs = ctx._logs.filter(l => l.level === 'error');
@@ -90,12 +100,13 @@ describe('exportWorker — early-exit for invalid payloads', () => {
   });
 
   it('returns early and does not call updateJob when docId is missing', async () => {
-    const updateJobMock = mock.method(tables, 'updateJob', async () => {});
+    const calls = [];
+    mm.setUpdateJob(async (jobId, patch) => { calls.push(patch); });
     const ctx = createMockContext();
 
     await runHandler(makeTask({ docId: '' }), ctx);
 
-    assert.equal(updateJobMock.mock.callCount(), 0,
+    assert.equal(calls.length, 0,
       'updateJob must not be called for messages without a docId');
 
     const errorLogs = ctx._logs.filter(l => l.level === 'error');
@@ -103,11 +114,12 @@ describe('exportWorker — early-exit for invalid payloads', () => {
   });
 
   it('returns early when both jobId and docId are absent', async () => {
-    const updateJobMock = mock.method(tables, 'updateJob', async () => {});
+    const calls = [];
+    mm.setUpdateJob(async (jobId, patch) => { calls.push(patch); });
 
     await runHandler(makeTask({ jobId: undefined, docId: undefined }));
 
-    assert.equal(updateJobMock.mock.callCount(), 0);
+    assert.equal(calls.length, 0);
   });
 });
 
@@ -115,16 +127,16 @@ describe('exportWorker — job status progression', () => {
   it('updates job status to "running" before any document lookup', async () => {
     const callOrder = [];
 
-    mock.method(tables, 'updateJob', async (jobId, patch) => {
+    mm.setUpdateJob(async (jobId, patch) => {
       callOrder.push({ fn: 'updateJob', status: patch.status });
     });
-    mock.method(tables, 'getDocument', async () => {
+    mm.setGetDocument(async () => {
       callOrder.push({ fn: 'getDocument' });
       return makeDoc();
     });
-    mock.method(storage, 'downloadToBuffer', async () => Buffer.from('pdf'));
-    mock.method(storage, 'uploadBuffer', async () => {});
-    mock.method(storage, 'buildBlobSasUrl', () => ({
+    mm.setDownloadToBuffer(async () => Buffer.from('pdf'));
+    mm.setUploadBuffer(async () => {});
+    mm.setBuildBlobSasUrl(() => ({
       url: 'https://example.com/export.pdf?sig=xxx',
       expiresOn: new Date().toISOString(),
     }));
@@ -142,13 +154,11 @@ describe('exportWorker — job status progression', () => {
   it('updates job to "completed" with resultUri on successful export', async () => {
     const updateJobCalls = [];
 
-    mock.method(tables, 'updateJob', async (jobId, patch) => {
-      updateJobCalls.push(patch);
-    });
-    mock.method(tables, 'getDocument', async () => makeDoc());
-    mock.method(storage, 'downloadToBuffer', async () => Buffer.from('pdf-bytes'));
-    mock.method(storage, 'uploadBuffer', async () => {});
-    mock.method(storage, 'buildBlobSasUrl', () => ({
+    mm.setUpdateJob(async (jobId, patch) => { updateJobCalls.push(patch); });
+    mm.setGetDocument(async () => makeDoc());
+    mm.setDownloadToBuffer(async () => Buffer.from('pdf-bytes'));
+    mm.setUploadBuffer(async () => {});
+    mm.setBuildBlobSasUrl(() => ({
       url: 'https://storage.example.com/pdf-export/user@example.com/doc-abc/job-001.pdf?sig=abc',
       expiresOn: new Date().toISOString(),
     }));
@@ -166,10 +176,8 @@ describe('exportWorker — job status progression', () => {
   it('updates job to "failed" when an error occurs', async () => {
     const updateJobCalls = [];
 
-    mock.method(tables, 'updateJob', async (jobId, patch) => {
-      updateJobCalls.push(patch);
-    });
-    mock.method(tables, 'getDocument', async () => {
+    mm.setUpdateJob(async (jobId, patch) => { updateJobCalls.push(patch); });
+    mm.setGetDocument(async () => {
       throw new Error('Storage unavailable');
     });
 
@@ -188,10 +196,8 @@ describe('exportWorker — job status progression', () => {
 describe('exportWorker — document validation', () => {
   it('throws and marks job failed when getDocument returns null', async () => {
     const updateJobCalls = [];
-    mock.method(tables, 'updateJob', async (jobId, patch) => {
-      updateJobCalls.push(patch);
-    });
-    mock.method(tables, 'getDocument', async () => null);
+    mm.setUpdateJob(async (jobId, patch) => { updateJobCalls.push(patch); });
+    mm.setGetDocument(async () => null);
 
     await assert.rejects(
       () => runHandler(makeTask()),
@@ -204,10 +210,8 @@ describe('exportWorker — document validation', () => {
 
   it('throws and marks job failed when sourceBlobName is absent from document', async () => {
     const updateJobCalls = [];
-    mock.method(tables, 'updateJob', async (jobId, patch) => {
-      updateJobCalls.push(patch);
-    });
-    mock.method(tables, 'getDocument', async () => makeDoc({ sourceBlobName: '' }));
+    mm.setUpdateJob(async (jobId, patch) => { updateJobCalls.push(patch); });
+    mm.setGetDocument(async () => makeDoc({ sourceBlobName: '' }));
 
     await assert.rejects(
       () => runHandler(makeTask()),
@@ -224,15 +228,15 @@ describe('exportWorker — storage interactions', () => {
   it('downloads from the source container using the document sourceBlobName', async () => {
     const downloadCalls = [];
 
-    mock.method(tables, 'updateJob', async () => {});
-    mock.method(tables, 'getDocument', async () =>
+    mm.setUpdateJob(async () => {});
+    mm.setGetDocument(async () =>
       makeDoc({ sourceBlobName: 'owner@x.com/doc-abc/source.pdf' }));
-    mock.method(storage, 'downloadToBuffer', async (container, blobName) => {
+    mm.setDownloadToBuffer(async (container, blobName) => {
       downloadCalls.push({ container, blobName });
       return Buffer.from('raw-pdf');
     });
-    mock.method(storage, 'uploadBuffer', async () => {});
-    mock.method(storage, 'buildBlobSasUrl', () => ({
+    mm.setUploadBuffer(async () => {});
+    mm.setBuildBlobSasUrl(() => ({
       url: 'https://example.com/x?sig=y',
       expiresOn: new Date().toISOString(),
     }));
@@ -249,13 +253,13 @@ describe('exportWorker — storage interactions', () => {
   it('uploads to the export container with path <ownerEmail>/<docId>/<jobId>.pdf', async () => {
     const uploadCalls = [];
 
-    mock.method(tables, 'updateJob', async () => {});
-    mock.method(tables, 'getDocument', async () => makeDoc());
-    mock.method(storage, 'downloadToBuffer', async () => Buffer.from('raw-pdf'));
-    mock.method(storage, 'uploadBuffer', async (container, blobName, buffer, contentType) => {
+    mm.setUpdateJob(async () => {});
+    mm.setGetDocument(async () => makeDoc());
+    mm.setDownloadToBuffer(async () => Buffer.from('raw-pdf'));
+    mm.setUploadBuffer(async (container, blobName, buffer, contentType) => {
       uploadCalls.push({ container, blobName, contentType });
     });
-    mock.method(storage, 'buildBlobSasUrl', () => ({
+    mm.setBuildBlobSasUrl(() => ({
       url: 'https://example.com/x?sig=y',
       expiresOn: new Date().toISOString(),
     }));
@@ -278,11 +282,11 @@ describe('exportWorker — storage interactions', () => {
   it('generates a read SAS URL for the exported blob', async () => {
     const sasCalls = [];
 
-    mock.method(tables, 'updateJob', async () => {});
-    mock.method(tables, 'getDocument', async () => makeDoc());
-    mock.method(storage, 'downloadToBuffer', async () => Buffer.from('pdf'));
-    mock.method(storage, 'uploadBuffer', async () => {});
-    mock.method(storage, 'buildBlobSasUrl', (container, blobName, perms, minutes) => {
+    mm.setUpdateJob(async () => {});
+    mm.setGetDocument(async () => makeDoc());
+    mm.setDownloadToBuffer(async () => Buffer.from('pdf'));
+    mm.setUploadBuffer(async () => {});
+    mm.setBuildBlobSasUrl((container, blobName, perms, minutes) => {
       sasCalls.push({ container, blobName, perms, minutes });
       return {
         url: `https://example.com/${container}/${blobName}?sig=test`,
@@ -308,10 +312,8 @@ describe('exportWorker — error re-throw behavior', () => {
   it('re-throws the original error after marking the job as failed', async () => {
     const originalError = new Error('Downstream failure');
 
-    mock.method(tables, 'updateJob', async () => {});
-    mock.method(tables, 'getDocument', async () => {
-      throw originalError;
-    });
+    mm.setUpdateJob(async () => {});
+    mm.setGetDocument(async () => { throw originalError; });
 
     let caught;
     try {
@@ -330,13 +332,11 @@ describe('exportWorker — message decoding', () => {
   it('handles a JSON string message (string-serialised payload)', async () => {
     const updateJobCalls = [];
 
-    mock.method(tables, 'updateJob', async (jobId, patch) => {
-      updateJobCalls.push(patch);
-    });
-    mock.method(tables, 'getDocument', async () => makeDoc());
-    mock.method(storage, 'downloadToBuffer', async () => Buffer.from('pdf'));
-    mock.method(storage, 'uploadBuffer', async () => {});
-    mock.method(storage, 'buildBlobSasUrl', () => ({
+    mm.setUpdateJob(async (jobId, patch) => { updateJobCalls.push(patch); });
+    mm.setGetDocument(async () => makeDoc());
+    mm.setDownloadToBuffer(async () => Buffer.from('pdf'));
+    mm.setUploadBuffer(async () => {});
+    mm.setBuildBlobSasUrl(() => ({
       url: 'https://example.com/x?sig=y',
       expiresOn: new Date().toISOString(),
     }));
@@ -353,13 +353,11 @@ describe('exportWorker — message decoding', () => {
   it('handles a base64-encoded JSON message', async () => {
     const updateJobCalls = [];
 
-    mock.method(tables, 'updateJob', async (jobId, patch) => {
-      updateJobCalls.push(patch);
-    });
-    mock.method(tables, 'getDocument', async () => makeDoc());
-    mock.method(storage, 'downloadToBuffer', async () => Buffer.from('pdf'));
-    mock.method(storage, 'uploadBuffer', async () => {});
-    mock.method(storage, 'buildBlobSasUrl', () => ({
+    mm.setUpdateJob(async (jobId, patch) => { updateJobCalls.push(patch); });
+    mm.setGetDocument(async () => makeDoc());
+    mm.setDownloadToBuffer(async () => Buffer.from('pdf'));
+    mm.setUploadBuffer(async () => {});
+    mm.setBuildBlobSasUrl(() => ({
       url: 'https://example.com/x?sig=y',
       expiresOn: new Date().toISOString(),
     }));
