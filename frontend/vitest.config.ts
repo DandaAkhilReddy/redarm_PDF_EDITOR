@@ -9,5 +9,10 @@ export default defineConfig({
     setupFiles: ['./src/test/setup.ts'],
     include: ['src/**/*.test.{ts,tsx}'],
     css: false,
+    server: {
+      deps: {
+        inline: ['@testing-library/react', '@testing-library/user-event'],
+      },
+    },
   },
 });
