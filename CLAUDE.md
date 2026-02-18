@@ -18,6 +18,17 @@ Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
 
 **Types:** `feat`, `fix`, `chore`, `style`, `docs`, `refactor`, `test`, `perf`
 
+## Auto-Commit Hook (Automated)
+
+A `PostToolUse` hook at `.claude/hooks/auto-commit.sh` automatically commits and pushes
+after every `Edit` or `Write` tool call. **You do NOT need to manually run git add/commit/push** —
+it happens automatically via the hook. The hook:
+- Stages only the changed file (never `git add -A`)
+- Skips `.env`, `local.settings.json`, `.pem`, `.key` files
+- Skips gitignored files
+- Commits with `chore: update <filename>`
+- Pushes to `origin HEAD` after each commit
+
 ### Rules
 
 - NEVER amend previous commits
